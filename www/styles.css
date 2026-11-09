@@ -362,7 +362,7 @@ html, body { background: #050816; }
 .ibtn { width: 3.6rem; height: 3.6rem; border-radius: 50%; border: .12rem solid rgba(80, 130, 255, .4); background: rgba(10, 16, 40, .85);
   color: #dfe7ff; margin-left: .6rem; padding: 0; cursor: pointer; display: flex; align-items: center; justify-content: center; }
 .ibtn .ic { width: 1.8rem; height: 1.8rem; margin: 0; }
-#btn-update { margin-left: .6rem; }
+#btn-update { margin-left: 0; }
 #btn-multi { margin-right: 0; }
 
 /* pannelli della Home */
@@ -597,3 +597,14 @@ html, body { background: #050816; }
 .low-power .focused { transform: none !important; box-shadow: 0 0 0 .22rem #8fd0ff !important; }
 .low-power .pv-info, .low-power .ts-hint { text-shadow: none; }
 .low-power .pv-bar { background: rgba(0, 0, 0, .55); }
+
+/* riquadro "È disponibile un aggiornamento" in basso a sinistra (al posto di "BTV Player") */
+.side-update { display: flex; align-items: center; width: 100%; margin-top: 1rem; padding: 1rem 1.1rem; border-radius: 1rem; text-align: left;
+  cursor: pointer; color: #fff; border: .15rem solid #ffc93c; background: #1f6bff; background-image: linear-gradient(135deg, #1f8bff, #6a3dff); }
+.side-update.hidden { display: none; }
+.side-update .ic { width: 2.6rem; height: 2.6rem; margin-right: .9rem; color: #ffc93c; flex: none; }
+.side-update b { display: block; font-size: 1.1rem; line-height: 1.25; }
+.side-update span { display: block; }
+.side-update span { font-size: .95rem; color: #e6ecff; margin-top: .2rem; }
+.side-update.focused { border-color: #fff; box-shadow: 0 0 0 .22rem #fff, 0 0 2rem rgba(255, 201, 60, .7); }
+.low-power .side-update.focused { box-shadow: 0 0 0 .22rem #fff !important; }

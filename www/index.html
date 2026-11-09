@@ -18,7 +18,8 @@
     <aside id="sidebar">
       <div class="brand"><img class="brand-logo" src="icon.png" alt="BTV"></div>
       <nav id="groups"></nav>
-      <div class="side-info"><i data-ic="tv"></i><div><b>BTV Player</b><span id="side-ver"></span></div></div>
+      <div class="side-info" id="side-info"><i data-ic="tv"></i><div><b>BTV Player</b><span id="side-ver"></span></div></div>
+      <button id="btn-update" class="side-update focusable hidden" data-action="installUpdate"><i data-ic="bell"></i><div><b>È disponibile un aggiornamento</b><span id="upd-ver"></span></div></button>
     </aside>
     <main id="main">
       <header id="topbar">
@@ -27,7 +28,6 @@
         <div id="playlist-name"></div>
         <div id="clock"></div>
         <button id="btn-multi" class="btn focusable top-btn" data-action="openMulti"><i data-ic="multi"></i>Multivisione</button>
-        <button id="btn-update" class="btn focusable primary hidden" data-action="installUpdate"></button>
         <button id="btn-settings" class="ibtn focusable" data-action="openSettings" title="Impostazioni"><i data-ic="settings"></i></button>
       </header>
 

@@ -3,7 +3,7 @@
   'use strict';
 
   // ---------------------------------------------------------------- Config
-  var APP_VERSION = '1.8.8'; // aumentala a ogni aggiornamento: in Impostazioni vedi quale versione sta girando
+  var APP_VERSION = '1.8.9'; // aumentala a ogni aggiornamento: in Impostazioni vedi quale versione sta girando
   var PRESETS = [];      // nessuna lista precaricata: solo quelle che aggiungi tu
   // Guide TV gratuite in formato XMLTV (si possono disattivare o aggiungerne altre nelle Impostazioni).
   var DEFAULT_EPG = [];  // nessuna guida precaricata: quella della playlist + quelle che aggiungi tu
@@ -677,14 +677,25 @@
       .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
       .then(function (v) {
         if (!v || typeof v.version !== 'string' || !/^\d+\.\d+\.\d+$/.test(v.version) || !newerVersion(v.version, APP_VERSION)) {
-          state.update = null; el.updBtn.classList.add('hidden'); return;
+          showUpdateBox(null); return;
         }
         var apk = v.apk && typeof v.apk.url === 'string' && v.apk.url.indexOf(UPDATE_PREFIX) === 0 &&
           /^[0-9a-f]{64}$/.test(v.apk.sha256 || '') ? { url: v.apk.url, sha256: v.apk.sha256 } : null;
-        state.update = { version: v.version, apk: apk };
-        setIc(el.updBtn, 'refresh', 'Aggiornamento ' + v.version);
-        el.updBtn.classList.remove('hidden');
+        showUpdateBox({ version: v.version, apk: apk });
       }, function () { /* niente rete o file assente: si riprova più tardi */ });
+  }
+
+  // Riquadro in basso a sinistra: al posto di "BTV Player" compare "È disponibile un aggiornamento".
+  function showUpdateBox(u) {
+    state.update = u;
+    var on = !!u;
+    if (!on && Nav.current() === el.updBtn) Nav.focus(activeGroupEl());
+    el.updBtn.classList.toggle('hidden', !on);
+    $('side-info').classList.toggle('hidden', on);
+    if (on) {
+      $('upd-ver').textContent = 'Versione ' + u.version +
+        (platform === 'android' && u.apk ? ' · premi OK per installarla' : platform === 'web' ? ' · premi OK' : ' · si installa dal PC');
+    }
   }
 
   function installUpdate() {
@@ -703,7 +714,7 @@
     } else if (platform === 'web') {
       location.reload();
     } else {
-      toast('Nuova versione ' + u.version + ': aggiornala dal PC con lo script di installazione', 7000);
+      toast('Versione ' + u.version + ' disponibile. Su questa TV l\'aggiornamento si installa dal PC (tools\\install-lg.ps1): la TV non permette alle app di aggiornarsi da sole.', 9000);
     }
   }
 
@@ -1090,11 +1101,16 @@
           return firstMainItem() || el.search;
         }
         if (dir === 'up' && !from.previousSibling) return false;
-        if (dir === 'down' && !from.nextSibling) return false;
+        if (dir === 'down' && !from.nextSibling) return el.updBtn.classList.contains('hidden') ? false : el.updBtn;  // in fondo: aggiornamento
         if (dir === 'up') return from.previousSibling;
         if (dir === 'down') return from.nextSibling;
       }
-      var top = [el.search, el.multiBtn, el.updBtn, el.settingsBtn].filter(function (x) { return x && !x.classList.contains('hidden'); });
+      if (from === el.updBtn) {
+        if (dir === 'up') return el.groups.lastChild || false;
+        if (dir === 'right') return firstMainItem() || el.search;
+        return false;
+      }
+      var top = [el.search, el.multiBtn, el.settingsBtn].filter(function (x) { return x && !x.classList.contains('hidden'); });
       var ti = top.indexOf(from);
       if (ti >= 0) {
         if (dir === 'down') return firstMainItem() || activeGroupEl();
@@ -2530,7 +2546,7 @@
     installUpdate: function () { installUpdate(); },
     toggleUpdCheck: function () {
       state.updCheck = !state.updCheck; Store.set('updCheck', state.updCheck); updateOptLabels();
-      if (state.updCheck) checkUpdate(true); else { state.update = null; el.updBtn.classList.add('hidden'); }
+      if (state.updCheck) checkUpdate(true); else showUpdateBox(null);
     },
     openLogin: function () { openSettings(); Nav.setRoot(el.screens.settings, $('xt-server')); $('xt-server').scrollIntoView(); },
     addXtream: function () {
