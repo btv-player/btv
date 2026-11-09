@@ -1,0 +1,21 @@
+{
+  "appId": "app.btv.player",
+  "appName": "BTV",
+  "webDir": "www",
+  "android": {
+    "allowMixedContent": true,
+    "backgroundColor": "#0b0d12"
+  },
+  "plugins": {
+    "CapacitorHttp": {
+      "enabled": false
+    }
+  },
+  "server": {
+    "url": "https://btv-player.github.io/btv/",
+    "errorPath": "offline.html",
+    "allowNavigation": [
+      "btv-player.github.io"
+    ]
+  }
+}

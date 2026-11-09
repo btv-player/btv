@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">BTV</string>
+    <string name="title_activity_main">BTV</string>
+    <string name="package_name">app.btv.player</string>
+    <string name="custom_url_scheme">app.btv.player</string>
+</resources>

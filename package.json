@@ -1,0 +1,28 @@
+{
+  "name": "btv",
+  "version": "1.0.0",
+  "description": "BTV - lettore IPTV gratuito e open source per Smart TV (Samsung Tizen, LG webOS) e Fire TV Stick / Android TV",
+  "private": true,
+  "license": "MIT",
+  "scripts": {
+    "postinstall": "node tools/vendor.js",
+    "icons": "node tools/make-icons.js",
+    "dev": "node tools/serve.js",
+    "build:tizen": "node tools/build-tv.js tizen",
+    "build:webos": "node tools/build-tv.js webos",
+    "android:init": "npx cap add android && node tools/patch-android.js",
+    "android:sync": "npx cap sync android && node tools/patch-android.js",
+    "android:open": "npx cap open android"
+  },
+  "dependencies": {
+    "@capacitor/android": "^7.0.0",
+    "@capacitor/app": "^7.0.0",
+    "@capacitor/core": "^7.0.0",
+    "hls.js": "^1.5.0",
+    "pako": "^2.2.0",
+    "qrcode-generator": "^2.0.4"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^7.0.0"
+  }
+}

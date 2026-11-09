@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>BTV — offline</title>
+  <style>
+    html { font-size: 0.8333vw; }
+    html, body { margin: 0; height: 100%; background: #0b0d12; color: #e8eaf0; font-family: Roboto, "Segoe UI", Arial, sans-serif; }
+    body { display: flex; align-items: center; justify-content: center; text-align: center; }
+    h1 { font-size: 3rem; margin: 0 0 1rem; }
+    p { font-size: 1.5rem; color: #aab1c3; margin: 0 0 2.5rem; }
+    button { font: inherit; font-size: 1.6rem; padding: 1rem 2.5rem; border-radius: .8rem; border: .2rem solid #fff;
+      background: #fff; color: #0b0d12; cursor: pointer; }
+    .ic { width: 1.2em; height: 1.2em; vertical-align: -.22em; margin-right: .5em; }
+    .big .ic { width: 6rem; height: 6rem; margin: 0 0 1rem; color: #ff6a3d; }
+  </style>
+</head>
+<body>
+  <div>
+    <div class="big"><svg class="ic ic-offline" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M2.5 8.8a14 14 0 0 1 6.3-3.2M12 5a14 14 0 0 1 9.5 3.8M5.5 12.2a9.5 9.5 0 0 1 3.6-2M15 10.4a9.5 9.5 0 0 1 3.5 1.8M8.8 15.4a4.6 4.6 0 0 1 6.4 0"/><circle cx="12" cy="19" r="1.2" fill="currentColor" stroke="none"/><path d="M3.5 3.5l17 17"/></svg></div>
+    <h1>Nessuna connessione</h1>
+    <p>BTV ha bisogno di Internet. Controlla il Wi-Fi e riprova.</p>
+    <button id="retry" autofocus><svg class="ic ic-refresh" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M20 12a8 8 0 1 1-2.3-5.6"/><path d="M20 4.5v4.2h-4.2"/></svg>Riprova</button>
+  </div>
+  <script>
+    // Pagina mostrata dall'app Android quando non riesce a caricare la versione online.
+    var b = document.getElementById('retry');
+    b.focus();
+    function retry() { history.length > 1 ? history.back() : location.reload(); }
+    b.addEventListener('click', retry);
+    document.addEventListener('keydown', function (e) { if (e.keyCode === 13) retry(); });
+    setTimeout(retry, 15000);
+  </script>
+</body>
+</html>

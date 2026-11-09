@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>BTV</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div id="app">
+
+  <!-- ===== Schermata elenco canali ===== -->
+  <section id="browse" class="screen active">
+    <aside id="sidebar">
+      <div class="brand"><span class="brand-mark">B</span>BTV</div>
+      <nav id="groups"></nav>
+    </aside>
+    <main id="main">
+      <header id="topbar">
+        <input id="search" class="focusable" type="text" placeholder="Cerca canale…" autocomplete="off" spellcheck="false">
+        <div id="playlist-name"></div>
+        <button id="btn-multi" class="btn focusable" data-action="openMulti"><i data-ic="multi"></i>Multivisione</button>
+        <button id="btn-settings" class="btn focusable" data-action="openSettings"><i data-ic="settings"></i>Impostazioni</button>
+      </header>
+      <div id="status"></div>
+      <div id="grid"></div>
+      <div id="hint">OK: guarda · Play / Info / Verde: guida del canale · Menu / Rosso: preferito · Indietro: esci</div>
+    </main>
+  </section>
+
+  <!-- ===== Lettore ===== -->
+  <section id="player" class="screen">
+    <video id="video" playsinline autoplay></video>
+    <div id="spinner"><div class="ring"></div></div>
+    <div id="player-error" class="hidden">
+      <div class="perr-title">Canale non disponibile</div>
+      <div class="perr-msg"></div>
+      <div class="perr-help">▲ ▼ cambia canale · Indietro torna all'elenco</div>
+    </div>
+    <div id="numjump" class="hidden"></div>
+    <button id="live-badge" class="focusable hidden" data-action="goLive"></button>
+    <div id="osd" class="hidden">
+      <div class="osd-info">
+        <div class="osd-logo"></div>
+        <div class="osd-text">
+          <div class="osd-num"></div>
+          <div class="osd-name"></div>
+          <div class="osd-group"></div>
+        </div>
+        <div class="osd-epg hidden">
+          <div class="osd-now"></div>
+          <div class="osd-bar"><i></i></div>
+          <div class="osd-next"></div>
+        </div>
+      </div>
+      <div class="osd-shift" id="osd-shift"></div>
+      <div class="osd-buttons">
+        <button class="btn focusable" data-action="closePlayer"><i data-ic="back"></i>Canali</button>
+        <button class="btn focusable" data-action="seekBack" title="Indietro 30 secondi"><i data-ic="rewind"></i>30s</button>
+        <button class="btn focusable" id="osd-pause" data-action="togglePause"><i data-ic="pause"></i></button>
+        <button class="btn focusable" data-action="seekFwd" title="Avanti 30 secondi"><i data-ic="forward"></i>30s</button>
+        <button class="btn focusable" id="osd-live" data-action="goLive"><i data-ic="live"></i>Diretta</button>
+        <span class="osd-sep"></span>
+        <button class="btn focusable" data-action="openChannelList"><i data-ic="list"></i>Lista</button>
+        <button class="btn focusable" id="osd-prev" data-action="prevChannel"><i data-ic="previous"></i>Prec.</button>
+        <button class="btn focusable" data-action="openGuidePlaying"><i data-ic="guide"></i>Guida</button>
+        <button class="btn focusable" data-action="openMultiPlaying"><i data-ic="multi"></i>Multi</button>
+        <button class="btn focusable" id="osd-quality" data-action="cycleQuality"><i data-ic="quality"></i>Auto</button>
+        <button class="btn focusable hidden" id="osd-audio" data-action="cycleAudio"><i data-ic="audio"></i>Audio</button>
+        <button class="btn focusable hidden" id="osd-subs" data-action="cycleSubs"><i data-ic="subs"></i>No</button>
+        <button class="btn focusable" id="osd-fav" data-action="toggleFavPlaying"><i data-ic="star"></i></button>
+      </div>
+      <div class="osd-help">▲ ▼ cambia canale · ◀ ▶ indietro / avanti 30s · Menu: lista canali · Giallo: canale precedente · Indietro esci</div>
+    </div>
+  </section>
+
+  <!-- ===== Impostazioni ===== -->
+  <section id="settings" class="screen">
+    <div class="settings-wrap">
+      <h1>Impostazioni</h1>
+
+      <h2>Playlist</h2>
+      <div class="form-row">
+        <button class="btn focusable primary" data-action="openPair"><i data-ic="phone"></i>Aggiungi dal telefono o dal PC</button>
+        <span class="muted">Niente da scrivere col telecomando: inquadri un codice QR e incolli l'indirizzo sul telefono.</span>
+      </div>
+      <div id="pl-list"></div>
+
+      <h2>Aggiungi una playlist M3U</h2>
+      <div class="form-row">
+        <input id="pl-name" class="focusable" type="text" placeholder="Nome (es. La mia lista)" autocomplete="off" spellcheck="false">
+        <input id="pl-url" class="focusable wide" type="url" placeholder="URL della playlist (https://…/lista.m3u)" autocomplete="off" spellcheck="false">
+        <button class="btn focusable primary" data-action="addPlaylist">Aggiungi</button>
+      </div>
+
+      <h2>Guida TV (EPG)</h2>
+      <div class="form-row">
+        <button class="btn focusable" id="epg-toggle" data-action="toggleEpg"><i data-ic="guide"></i>Guida TV: attiva</button>
+        <button class="btn focusable" data-action="refreshEpg"><i data-ic="refresh"></i>Aggiorna guida</button>
+        <span id="epg-status" class="muted"></span>
+      </div>
+      <div id="epg-list"></div>
+      <div class="form-row">
+        <input id="epg-url" class="focusable wide" type="url" placeholder="URL guida XMLTV (https://…/guida.xml oppure .xml.gz)" autocomplete="off" spellcheck="false">
+        <button class="btn focusable primary" data-action="addEpg">Aggiungi guida</button>
+        <button class="btn focusable" data-action="openPair"><i data-ic="phone"></i>Dal telefono o PC</button>
+      </div>
+
+      <h2>Multivisione</h2>
+      <div class="form-row">
+        <button class="btn focusable" id="multi-pref" data-action="cycleMultiPref"><i data-ic="multi"></i>Riquadri: Automatico</button>
+        <span class="muted">Automatico = 4 su PC e box potenti, 2 su Fire TV Stick e TV Samsung/LG. Premi OK per cambiare.</span>
+      </div>
+
+      <h2>Altro</h2>
+      <div class="form-row">
+        <button class="btn focusable" data-action="reload"><i data-ic="refresh"></i>Ricarica playlist</button>
+        <button class="btn focusable" data-action="clearFavs">Svuota preferiti</button>
+      </div>
+      <div class="form-row">
+        <button class="btn focusable" id="opt-resume" data-action="toggleResume"><i data-ic="play"></i>All'avvio: ultimo canale</button>
+        <button class="btn focusable" id="opt-dead" data-action="toggleHideDead"><i data-ic="warning"></i>Canali non funzionanti: visibili</button>
+        <button class="btn focusable" data-action="clearDead"><i data-ic="refresh"></i>Riprova tutti i canali</button>
+        <button class="btn focusable" data-action="closeSettings"><i data-ic="back"></i>Torna ai canali</button>
+      </div>
+
+      <p class="note">
+        BTV è solo un lettore: non fornisce né ospita alcun contenuto.
+        Le liste predefinite provengono dal progetto open-source <b>iptv-org</b>
+        e contengono solo canali trasmessi liberamente dalle emittenti.
+        Aggiungi solo playlist che hai il diritto di usare.
+      </p>
+      <p class="note" id="app-version"></p>
+    </div>
+  </section>
+
+  <!-- ===== Multivisione ===== -->
+  <section id="multi" class="screen">
+    <div id="multi-bar">
+      <span class="mb-title"><i data-ic="multi"></i>Multivisione</span>
+      <button class="btn focusable mlayout" data-n="2"><i data-ic="two"></i>2 riquadri</button>
+      <button class="btn focusable mlayout" data-n="4"><i data-ic="multi"></i>4 riquadri</button>
+    </div>
+    <div id="multi-grid"></div>
+    <div id="multi-hint">◀ ▶ ▲ ▼ scegli riquadro (l'audio segue la selezione) · OK opzioni · CH+/CH− cambia canale · Indietro esci</div>
+  </section>
+
+  <!-- ===== Scelta del canale (multivisione) ===== -->
+  <div id="picker" class="hidden">
+    <div class="guide-head">
+      <div class="guide-titles">
+        <div class="guide-ch">Scegli un canale</div>
+        <div class="guide-sub">▲ ▼ scorri · ◀ ▶ salta di 10 · 0–9 numero · OK scegli · Indietro annulla</div>
+      </div>
+      <button class="btn" data-action="pickerClose"><i data-ic="close"></i></button>
+    </div>
+    <div id="picker-list"></div>
+  </div>
+
+  <!-- ===== Guida del canale (sovrapposta a elenco o lettore) ===== -->
+  <div id="guide" class="hidden">
+    <div class="guide-head">
+      <div class="guide-logo"></div>
+      <div class="guide-titles">
+        <div class="guide-ch"></div>
+        <div class="guide-sub">▲ ▼ programmi · ◀ ▶ altro canale · OK guarda · Indietro chiudi</div>
+      </div>
+      <button class="btn" data-action="guideClose"><i data-ic="close"></i></button>
+    </div>
+    <div id="guide-list"></div>
+    <div class="guide-desc hidden">
+      <div class="gd-title"></div>
+      <div class="gd-meta"></div>
+      <div class="gd-text"></div>
+      <button class="btn primary" data-action="guideWatch"><i data-ic="play"></i>Guarda il canale</button>
+    </div>
+  </div>
+
+  <!-- ===== Invia dal telefono o dal PC ===== -->
+  <div id="pair" class="hidden">
+    <div class="pair-box">
+      <div class="pair-title"><i data-ic="phone"></i>Aggiungi dal telefono o dal PC</div>
+      <div class="pair-body">
+        <div class="pair-qr"></div>
+        <div class="pair-info">
+          <div class="pair-step"><b>Telefono:</b> inquadra il codice QR con la fotocamera.</div>
+          <div class="pair-step"><b>PC o telefono:</b> apri <span class="pair-url"></span> e scrivi questo codice:</div>
+          <div class="pair-code"></div>
+          <div class="pair-step">Poi incolla l'indirizzo della playlist o della guida TV e premi <b>Invia alla TV</b>.</div>
+          <div class="pair-status"></div>
+          <div class="pair-log"></div>
+        </div>
+      </div>
+      <div class="pair-foot">
+        <span class="muted">Dati cifrati con il codice: solo questa TV può leggerli. Il codice vale 15 minuti.</span>
+        <button class="btn" data-action="closePair">Chiudi (Indietro)</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="hidden"></div>
+</div>
+
+<script src="vendor/hls.min.js"></script>
+<script src="vendor/pako_inflate.min.js"></script>
+<script src="vendor/qrcode.js"></script>
+<script src="js/pair.js"></script>
+<script src="js/icons.js"></script>
+<script src="js/store.js"></script>
+<script src="js/m3u.js"></script>
+<script src="js/epg.js"></script>
+<script src="js/nav.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>

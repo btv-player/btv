@@ -1,0 +1,23 @@
+node_modules/
+dist/
+*.wgt
+*.ipk
+android/app/build/
+android/build/
+android/.gradle/
+android/local.properties
+# Chiavi di firma e password: non devono MAI finire su GitHub
+*.jks
+*.keystore
+*.p12
+*.pfx
+keystore.properties
+signing.properties
+.env
+.env.*
+.tizen-studio-data/
+android/.idea/
+# Impostazioni locali degli strumenti
+.claude/
+# Generati da "npm install" (tools/vendor.js) e da "cap sync"
+www/vendor/
