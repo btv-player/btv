@@ -154,7 +154,10 @@ Il codice dell'app è **dentro l'app**: niente viene caricato da internet all'av
 - Se c'è una versione nuova compare **Aggiornamento x.y.z** accanto a Impostazioni. Non succede altro finché non lo premi.
 - Sulla Fire TV, premendolo, l'app scarica l'APK dalle release di GitHub, ne verifica l'impronta SHA-256 e apre
   l'installatore di Android, che chiede conferma e accetta solo un APK firmato **con la tua chiave**.
-- Su LG/Samsung segnala la nuova versione: si aggiorna dal PC con lo script di installazione.
+- Su LG/Samsung, premendolo, l'app scarica il nuovo codice (`btv-player.github.io/btv/web/…`), ne verifica la
+  **firma Ed25519** (chiave privata solo sul PC di chi pubblica, chiave pubblica dentro l'app in `www/js/boot.js`) e lo
+  usa dal riavvio. Se una versione scaricata non parte, al riavvio successivo torna da sola a quella installata;
+  in *Impostazioni → Torna alla versione installata* si torna indietro a mano. Il PC serve solo la prima volta.
 - Il controllo si può spegnere in *Impostazioni → Controllo aggiornamenti*.
 
 Per pubblicare una nuova versione: aumenta `APP_VERSION` in `www/js/app.js`, salva le modifiche in git e poi
