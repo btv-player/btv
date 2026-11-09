@@ -1865,9 +1865,14 @@
     setIc(b, 'multi', 'Riquadri: ' + (state.multiPref ? state.multiPref : 'Automatico (' + deviceTiles() + ')'));
   }
 
+  // Canale dall'indirizzo: indice costruito al caricamento della playlist (prima scorreva tutta la lista ogni volta).
   function channelByUrl(url) {
-    for (var i = 0; i < state.channels.length; i++) if (state.channels[i].url === url) return state.channels[i];
-    return null;
+    if (state.byUrlFor !== state.channels) {
+      state.byUrl = {};
+      for (var i = state.channels.length - 1; i >= 0; i--) state.byUrl['u:' + state.channels[i].url] = state.channels[i];
+      state.byUrlFor = state.channels;
+    }
+    return state.byUrl['u:' + url] || null;
   }
 
   function buildTiles(n) {
@@ -2419,27 +2424,39 @@
     var favs = fixedList ? [] : favChannels();
     var rest = fixedList || state.channels.filter(function (c) { return !state.favorites[c.url]; });
     var list = favs.concat(rest).slice(0, 3000);
-    state.picker = { list: list, sel: 0, onPick: onPick, favCount: favs.length };
+    state.picker = { list: list, sel: 0, onPick: onPick, favCount: favs.length, rendered: 0 };
     el.picker.querySelector('.guide-ch').textContent = title || 'Scegli un canale';
-    var box = el.pickerList;
-    box.innerHTML = '';
-    var frag = document.createDocumentFragment();
-    list.forEach(function (ch, i) {
-      if (i === 0 && favs.length) frag.appendChild(pickerHeader('Preferiti', 'starf'));
-      if (i === favs.length && favs.length) frag.appendChild(pickerHeader('Tutti i canali'));
+    el.pickerList.innerHTML = '';
+    var start = selIdx > 0 && selIdx < list.length ? selIdx : 0;
+    pickerRender(start + 60);
+    el.picker.classList.remove('hidden');
+    pickerSelect(start);
+  }
+
+  // Righe della lista canali create man mano (prima 120, poi a blocchi): con playlist grandi sulle TV
+  // creare migliaia di righe insieme bloccava l'apertura della lista.
+  function pickerRender(upTo) {
+    var p = state.picker;
+    if (!p) return;
+    var end = Math.min(p.list.length, Math.max(upTo, p.rendered + 120));
+    if (end <= p.rendered) return;
+    var frag = document.createDocumentFragment(), now = Date.now();
+    for (var i = p.rendered; i < end; i++) {
+      var ch = p.list[i];
+      if (i === 0 && p.favCount) frag.appendChild(pickerHeader('Preferiti', 'starf'));
+      if (i === p.favCount && p.favCount) frag.appendChild(pickerHeader('Tutti i canali'));
       var r = document.createElement('div');
       r.className = 'pk-row' + (state.dead[ch.url] ? ' dead' : '');
       r.setAttribute('data-i', i);
       var num = document.createElement('span'); num.className = 'pk-num'; num.textContent = ch.num;
       var nm = document.createElement('span'); nm.className = 'pk-name'; nm.textContent = ch.title;
-      var nn = EPG.nowNext(ch.epg);
-      var now = document.createElement('span'); now.className = 'pk-now'; now.textContent = nn.now ? nn.now[2] : '';
-      r.appendChild(num); r.appendChild(nm); r.appendChild(now);
+      var nn = EPG.nowNext(ch.epg, now);
+      var nw = document.createElement('span'); nw.className = 'pk-now'; nw.textContent = nn.now ? nn.now[2] : '';
+      r.appendChild(num); r.appendChild(nm); r.appendChild(nw);
       frag.appendChild(r);
-    });
-    box.appendChild(frag);
-    el.picker.classList.remove('hidden');
-    pickerSelect(selIdx > 0 && selIdx < list.length ? selIdx : 0);
+    }
+    el.pickerList.appendChild(frag);
+    p.rendered = end;
   }
 
   // Lista canali sopra il video: scegli senza uscire da quello che stai guardando.
@@ -2476,6 +2493,7 @@
     var prev = el.pickerList.querySelector('.pk-row.sel');
     if (prev) prev.classList.remove('sel');
     p.sel = Math.max(0, Math.min(i, p.list.length - 1));
+    if (p.sel + 30 >= p.rendered) pickerRender(p.sel + 120);             // crea le righe prima di arrivarci
     var row = el.pickerList.querySelector('.pk-row[data-i="' + p.sel + '"]');
     if (row) { row.classList.add('sel'); if (row.scrollIntoViewIfNeeded) row.scrollIntoViewIfNeeded(false); else row.scrollIntoView({ block: 'nearest' }); }
   }
@@ -2796,6 +2814,9 @@
     if (!t) return;
     Nav.focus(t);
     activate(t);
+  });
+  el.pickerList.addEventListener('scroll', function () {
+    if (state.picker && el.pickerList.scrollTop + el.pickerList.clientHeight > el.pickerList.scrollHeight - 600) pickerRender(state.picker.rendered + 120);
   });
   el.hgList.addEventListener('scroll', function () {
     if (el.hgList.scrollTop + el.hgList.clientHeight > el.hgList.scrollHeight - 400) renderGuideRows(HG_PAGE);
