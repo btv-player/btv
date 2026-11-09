@@ -3,7 +3,7 @@
   'use strict';
 
   // ---------------------------------------------------------------- Config
-  var APP_VERSION = '1.8.6'; // aumentala a ogni aggiornamento: in Impostazioni vedi quale versione sta girando
+  var APP_VERSION = '1.8.7'; // aumentala a ogni aggiornamento: in Impostazioni vedi quale versione sta girando
   var PRESETS = [];      // nessuna lista precaricata: solo quelle che aggiungi tu
   // Guide TV gratuite in formato XMLTV (si possono disattivare o aggiungerne altre nelle Impostazioni).
   var DEFAULT_EPG = [];  // nessuna guida precaricata: quella della playlist + quelle che aggiungi tu
@@ -1588,11 +1588,6 @@
     el.osd.classList.add('hidden');
   }
 
-  function firstOsdButton() {
-    var b = el.osd.querySelectorAll('.osd-buttons .btn');
-    for (var i = 0; i < b.length; i++) if (!b[i].classList.contains('hidden')) return b[i];
-    return null;
-  }
   function osdVisible() { return !el.osd.classList.contains('hidden'); }
 
   function updateOsdFav() {
@@ -2609,22 +2604,14 @@
 
     if (state.screen === 'player') {
       switch (a) {
-        case 'down':
-          if (osdVisible() && Nav.current() === $('osd-home')) { Nav.focus(firstOsdButton()); showOsd(true); return true; }
-          playIndex(state.playIdx - 1); return true;
-        case 'up':
-          if (osdVisible() && Nav.current() === $('osd-home')) { showOsd(true); return true; }
-          playIndex(state.playIdx + 1); return true;
-        case 'chup': playIndex(state.playIdx + 1); return true;
-        case 'chdown': playIndex(state.playIdx - 1); return true;
+        case 'up': case 'chup': playIndex(state.playIdx + 1); return true;
+        case 'down': case 'chdown': playIndex(state.playIdx - 1); return true;
         case 'rw': seekBy(-SEEK_STEP); return true;
         case 'ff': seekBy(SEEK_STEP); return true;
         case 'left': case 'right':
           // Barra visibile: muovi tra i pulsanti. Barra nascosta: la apre sul pulsante ⏪/⏩
           // (prima tornava subito indietro di 30 s ed era facile farlo per sbaglio).
-          if (osdVisible() && Nav.current() === $('osd-home')) { if (a === 'right') Nav.focus(firstOsdButton()); showOsd(true); }
-          else if (osdVisible() && a === 'left' && Nav.current() === firstOsdButton()) { Nav.focus($('osd-home')); showOsd(true); }
-          else if (osdVisible() && Nav.current() && el.osd.contains(Nav.current())) { Nav.move(a); showOsd(true); }
+          if (osdVisible() && Nav.current() && el.osd.contains(Nav.current())) { Nav.move(a); showOsd(true); }
           else { showOsd(false); Nav.setRoot(el.osd, el.osd.querySelector(a === 'left' ? '[data-action="seekBack"]' : '[data-action="seekFwd"]')); showOsd(true); }
           return true;
         case 'live': goLive(); return true;

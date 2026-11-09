@@ -511,7 +511,7 @@ html, body { background: #050816; }
 #h-favs .ftile { height: 6.6rem; }
 
 /* Home in alto a sinistra nel lettore e nella multivisione */
-.osd-home { position: fixed; top: 2.4rem; left: 3rem; font-size: 1.2rem; padding: .7rem 1.4rem; }
+#osd-home .ic { color: #7fc4ff; }
 #live-badge { left: auto; right: 3rem; }
 .mhome { margin-right: 1.2rem; }
 
