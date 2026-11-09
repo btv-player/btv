@@ -3,7 +3,7 @@
   'use strict';
 
   // ---------------------------------------------------------------- Config
-  var APP_VERSION = '1.8.5'; // aumentala a ogni aggiornamento: in Impostazioni vedi quale versione sta girando
+  var APP_VERSION = '1.8.6'; // aumentala a ogni aggiornamento: in Impostazioni vedi quale versione sta girando
   var PRESETS = [];      // nessuna lista precaricata: solo quelle che aggiungi tu
   // Guide TV gratuite in formato XMLTV (si possono disattivare o aggiungerne altre nelle Impostazioni).
   var DEFAULT_EPG = [];  // nessuna guida precaricata: quella della playlist + quelle che aggiungi tu
