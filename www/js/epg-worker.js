@@ -4,14 +4,10 @@ importScripts('../vendor/pako_inflate.min.js', 'epg.js');
 
 self.onmessage = function (e) {
   try {
-    var text = EPGText(new Uint8Array(e.data.buf));
+    var text = EPG.toText(new Uint8Array(e.data.buf), pako);
     self.postMessage({ ok: true, guide: EPG.parse(text, e.data.now) });
   } catch (err) {
     self.postMessage({ ok: false, error: String(err && err.message || err) });
   }
 };
 
-function EPGText(bytes) {
-  if (bytes[0] === 0x1f && bytes[1] === 0x8b) bytes = pako.ungzip(bytes);
-  return new TextDecoder('utf-8').decode(bytes);
-}

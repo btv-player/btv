@@ -11,6 +11,10 @@
     :root { color-scheme: dark; }
     html, body { margin: 0; background: #0b0d12; color: #e8eaf0; font: 17px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif; }
     main { max-width: 640px; margin: 0 auto; padding: 56px 20px; }
+    .logo { width: 96px; height: 96px; border-radius: 22px; box-shadow: 0 0 30px rgba(60, 140, 255, .45); }
+    code { background: #0e1430; padding: 2px 8px; border-radius: 6px; color: #7fc4ff; }
+    ol { margin: 8px 0 0; padding-left: 22px; }
+    li { margin-bottom: 6px; }
     .mark { width: 64px; height: 64px; border-radius: 16px; background: linear-gradient(135deg, #ff6a3d, #c4209c);
       display: flex; align-items: center; justify-content: center; font-weight: 900; font-size: 34px; color: #fff; }
     h1 { font-size: 30px; margin: 20px 0 6px; }
@@ -23,13 +27,23 @@
 </head>
 <body>
 <main>
-  <div class="mark">B</div>
+  <img class="logo" src="icon.png" alt="BTV">
   <h1>BTV</h1>
   <p class="sub">Lettore multimediale per Smart TV e Fire TV.</p>
 
   <div class="card">
     <p><b>BTV è solo un lettore.</b> Non fornisce, non ospita, non vende e non consiglia alcun canale, playlist o contenuto.</p>
     <p>L'app è vuota: ogni utente aggiunge sul proprio dispositivo le playlist e gli abbonamenti che ha il diritto di usare.</p>
+  </div>
+
+  <div class="card">
+    <p><b>Installare su Fire TV Stick</b></p>
+    <ol>
+      <li>Sulla Fire TV installa l'app gratuita <b>Downloader</b> (dallo store Amazon).</li>
+      <li>Impostazioni → La mia Fire TV → Opzioni sviluppatore → <b>Installa app sconosciute</b>: attiva per Downloader.</li>
+      <li>Apri Downloader, scrivi <code>btv-player.github.io/btv/apk</code> e conferma l'installazione.</li>
+    </ol>
+    <p class="muted">Gli aggiornamenti poi arrivano dall'app stessa: compare "Aggiornamento disponibile" e installi solo se vuoi.</p>
   </div>
 
   <p class="muted">Codice sorgente aperto. Nessun dato degli utenti viene raccolto o conservato da questo sito.</p>

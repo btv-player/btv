@@ -46,9 +46,10 @@ try {
   Write-Host "Installo BTV sulla TV..." -ForegroundColor Cyan
   ares-install --device btvtv $ipk.FullName
   if ($LASTEXITCODE -ne 0) { throw "Installazione non riuscita" }
-  ares-launch --device btvtv app.btv.player | Out-Null
+  # Non apro l'app da sola: la trovi nella barra delle app quando vuoi tu.
   Write-Host ""
   Write-Host "Fatto! BTV e' installata sulla TV LG (la trovi nella barra delle app)." -ForegroundColor Green
+  Write-Host "Sicurezza: nell'app Developer Mode della TV spegni 'Key Server' (serve solo alla prima installazione)." -ForegroundColor Yellow
   Write-Host "Ricorda: la modalita' sviluppatore scade dopo 50 ore; rinnovala dall'app Developer Mode (Extend Session)." -ForegroundColor Yellow
 } finally {
   Pop-Location

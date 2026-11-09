@@ -1,4 +1,4 @@
-package org.liberatv.app;
+package app.btv.player;
 
 import android.os.Bundle;
 import com.getcapacitor.BridgeActivity;

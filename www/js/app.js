@@ -3,7 +3,7 @@
   'use strict';
 
   // ---------------------------------------------------------------- Config
-  var APP_VERSION = '1.7.0'; // aumentala a ogni aggiornamento: in Impostazioni vedi quale versione sta girando
+  var APP_VERSION = '1.8.0'; // aumentala a ogni aggiornamento: in Impostazioni vedi quale versione sta girando
   var PRESETS = [];      // nessuna lista precaricata: solo quelle che aggiungi tu
   // Guide TV gratuite in formato XMLTV (si possono disattivare o aggiungerne altre nelle Impostazioni).
   var DEFAULT_EPG = [];  // nessuna guida precaricata: quella della playlist + quelle che aggiungi tu
@@ -22,7 +22,10 @@
   var STALL_SECONDS = 15;      // video fermo da così tanti secondi = bloccato: riavvio automatico
   var STALL_RETRIES = 3;
   var SEND_URL = 'https://btv-player.github.io/btv/invia/'; // pagina per inviare playlist/guide dal telefono o PC
-  var PAIR_MINUTES = 15;          // validità del codice mostrato sulla TV       // riavvii automatici di fila prima di mostrare l'errore
+  var PAIR_MINUTES = 15;
+  var VERSION_URL = 'https://btv-player.github.io/btv/version.json'; // solo lettura: numero dell'ultima versione
+  var UPDATE_PREFIX = 'https://github.com/btv-player/btv/releases/download/';
+  var MAX_DOWNLOAD = 60 * 1024 * 1024;  // playlist o guida scaricata: oltre è un errore (protegge la memoria della TV)          // validità del codice mostrato sulla TV       // riavvii automatici di fila prima di mostrare l'errore
 
   var KEYS = {
     left: [37], up: [38], right: [39], down: [40], enter: [13],
@@ -41,7 +44,7 @@
   // ---------------------------------------------------------------- Stato
   var platform = detectPlatform();
   var state = {
-    channels: [], groups: [], group: '__all', query: '',
+    channels: [], groups: [], group: '__home', query: '', pv: { ch: null, hls: null, timer: null },
     filtered: [], rendered: 0,
     favorites: Store.get('favorites', {}),
     playlists: loadPlaylists(),
@@ -53,7 +56,7 @@
     epgEnabled: Store.get('epgEnabled', true),
     epgSources: loadEpgSources(),
     playlistEpg: [], epgToken: 0, epgCount: 0, epgLoading: false,
-    guide: null, pair: null, multiSingle: Store.get('multiSingle', false),
+    guide: null, pair: null, update: null, updLast: 0, updCheck: Store.get('updCheck', true), multiSingle: Store.get('multiSingle', false),
     quality: Store.get('quality', 0), levels: [],
     multiPref: Store.get('multiPref', 0), multi: null, multiReturn: null, multiBrowseFocus: null, picker: null,
     resumeLast: Store.get('resumeLast', true), resumed: false, prevUrl: null,
@@ -74,7 +77,8 @@
     plList: $('pl-list'), plNameIn: $('pl-name'), plUrlIn: $('pl-url'),
     epgList: $('epg-list'), epgUrlIn: $('epg-url'), epgToggle: $('epg-toggle'), epgStatus: $('epg-status'),
     guide: $('guide'), guideList: $('guide-list'),
-    toast: $('toast'), pair: $('pair')
+    toast: $('toast'), pair: $('pair'), home: $('home'), pvPanel: $('h-preview'), pvVideo: $('pv-video'), hgList: $('hg-list'),
+    clock: $('clock'), updBtn: $('btn-update'), optUpd: $('opt-update')
   };
 
   // ---------------------------------------------------------------- Piattaforma
@@ -152,8 +156,10 @@
       if (state.screen === 'player' && state.playing) stopStream();
       else if (state.screen === 'multi' && state.multi) state.multi.tiles.forEach(function (t, i) { tileStop(i); });
       keepScreenOn(false);
+      previewStop();
       return;
     }
+    if (state.screen === 'browse' && state.pv.ch && !el.home.classList.contains('hidden')) previewPlay(state.pv.ch);
     if (state.screen === 'player' && state.playing) { startStream(state.playing); showOsd(false); }
     else if (state.screen === 'multi' && state.multi) {
       state.multi.tiles.forEach(function (t, i) { if (t.ch) tileLoad(i, t.ch); });
@@ -203,6 +209,30 @@
     return m[1] + m[2] + (m[3] && m[3] !== '/' ? '/…' : '');
   }
 
+  // Indirizzi della rete di casa (router, NAS, telecamere...): li usa solo una playlist che sta anch'essa in casa
+  // (es. un server IPTV locale). Così una playlist o una guida esterna non può far contattare i tuoi dispositivi.
+  function isLocalUrl(u) {
+    var m = /^[a-z][a-z0-9+.-]*:\/\/(?:[^@\/?#]*@)?(\[[^\]]+\]|[^\/:?#]+)/i.exec(String(u || ''));
+    if (!m) return false;
+    var h = m[1].toLowerCase().replace(/^\[|\]$/g, '');
+    if (h === 'localhost' || /\.(local|lan|home|internal|localdomain|home\.arpa)$/.test(h)) return true;
+    if (h.indexOf('.') < 0 && h.indexOf(':') < 0) return true;                 // nome senza dominio ("router")
+    var ip = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(h);
+    if (ip) {
+      var a = +ip[1], b = +ip[2];
+      return a === 10 || a === 127 || a === 0 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) ||
+        (a === 169 && b === 254) || (a === 100 && b >= 64 && b <= 127) || a >= 224;
+    }
+    if (/^(0x[0-9a-f]*|\d+)$/i.test(h.split('.').pop())) return true;        // IP in forme strane (decimale, esadecimale): bloccati
+    if (h.indexOf(':') >= 0) return h === '::1' || h === '::' || /^f[cd]/.test(h) || /^fe[89ab]/.test(h) || /^::ffff:/.test(h);
+    return false;
+  }
+  function blockedLan(u) {
+    if (!isLocalUrl(u)) return false;
+    var pl = activePlaylist();
+    return !(pl && isLocalUrl(pl.url));
+  }
+
   function safeUrl(u) { return /^(https?:)?\/\//i.test(u || '') || /^data:image\//i.test(u || ''); }
 
   function initials(name) {
@@ -220,7 +250,7 @@
 
   function fillLogo(box, ch) {
     box.innerHTML = '';
-    if (safeUrl(ch.logo)) {
+    if (safeUrl(ch.logo) && !blockedLan(ch.logo)) {
       var img = new Image();
       img.alt = '';
       img.setAttribute('loading', 'lazy');
@@ -266,14 +296,17 @@
     if (Http) {
       return Http.get({ url: url, responseType: binary ? 'arraybuffer' : 'text' }).then(function (r) {
         if (r.status >= 400) throw new Error('HTTP ' + r.status);
+        if (r.data && r.data.length > MAX_DOWNLOAD * (binary ? 1.4 : 1)) throw new Error('file troppo grande');
         if (!binary) return typeof r.data === 'string' ? r.data : String(r.data);
         return typeof r.data === 'string' ? b64ToBytes(r.data) : new Uint8Array(r.data);
       });
     }
     function direct(u) {
-      return fetch(u).then(function (r) {
+      return fetch(u, { credentials: 'omit', referrerPolicy: 'no-referrer' }).then(function (r) {
         if (!r.ok) throw new Error('HTTP ' + r.status);
-        return binary ? r.arrayBuffer().then(function (b) { return new Uint8Array(b); }) : r.text();
+        if (+r.headers.get('content-length') > MAX_DOWNLOAD) throw new Error('file troppo grande');
+        return binary ? r.arrayBuffer().then(function (b) { if (b.byteLength > MAX_DOWNLOAD) throw new Error('file troppo grande'); return new Uint8Array(b); }) :
+          r.text().then(function (t) { if (t.length > MAX_DOWNLOAD) throw new Error('file troppo grande'); return t; });
       });
     }
     return direct(url).catch(function (err) {
@@ -314,6 +347,7 @@
 
   // Prima apertura (o nessuna playlist): tre modi per aggiungere la propria lista.
   function showWelcome() {
+    hideHome();
     state.channels = []; state.filtered = []; state.groups = [];
     el.plName.textContent = '';
     setStatus('');
@@ -360,18 +394,266 @@
     return p;
   }
 
+  // ---------------------------------------------------------------- Home
+  function firstMainItem() {
+    if (!el.home.classList.contains('hidden')) return el.pvPanel;
+    return el.grid.querySelector('.focusable');
+  }
+
+  function hideHome() {
+    if (el.home.classList.contains('hidden')) return;
+    previewStop();
+    el.home.classList.add('hidden');
+    el.grid.classList.remove('hidden');
+    el.status.classList.remove('hidden');
+  }
+
+  // Icona della categoria dal suo nome (le playlist non hanno icone: le deduciamo).
+  function catIcon(name) {
+    var n = String(name).toLowerCase();
+    if (/sport|calcio|dazn|eurosport|basket|volley|tennis|motor|f1|golf|nba|serie a/.test(n)) return 'trophy';
+    if (/cinema|film|movie|netflix|prime|disney|apple|vod|serie/.test(n)) return 'film';
+    if (/kid|bambin|cartoon|ragazzi|junior/.test(n)) return 'smile';
+    if (/music|musica|radio|mtv/.test(n)) return 'music';
+    if (/news|notizie|tg|informazione/.test(n)) return 'news';
+    if (/doc|natura|scienza|storia|discovery/.test(n)) return 'doc';
+    if (/chiaro|generalist|rai|mediaset|tv|intratten/.test(n)) return 'tv';
+    if (/world|mondo|international|estero/.test(n)) return 'globe';
+    return 'folder';
+  }
+
+  function showHome() {
+    el.grid.innerHTML = '';
+    el.grid.classList.add('hidden');
+    el.status.classList.add('hidden');
+    el.home.classList.remove('hidden');
+    renderHome();
+    if (!state.pv.ch) {
+      var last = channelByUrl(Store.get('lastChannel', ''));
+      var favs = state.channels.filter(function (c) { return state.favorites[c.url]; });
+      state.pv.ch = last || favs[0] || state.channels[0] || null;
+    }
+    if (state.pv.ch && state.screen === 'browse') previewPlay(state.pv.ch);
+  }
+
+  function renderHome() {
+    var now = Date.now();
+    // Guida: i canali nell'ordine della playlist (preferiti prima), con il programma in onda
+    var favs = state.channels.filter(function (c) { return state.favorites[c.url]; });
+    var list = favs.concat(state.channels.filter(function (c) { return !state.favorites[c.url]; })).slice(0, 120);
+    var frag = document.createDocumentFragment();
+    list.forEach(function (ch) {
+      var r = document.createElement('div');
+      r.className = 'hg-row focusable';
+      r.setAttribute('data-action', 'homePlay');
+      r.setAttribute('data-url', ch.url);
+      var c = document.createElement('div'); c.className = 'hg-ch';
+      var lg = document.createElement('div'); lg.className = 'hg-logo'; fillLogo(lg, ch);
+      var nm = document.createElement('span'); nm.className = 'hg-num'; nm.textContent = ch.num;
+      c.appendChild(lg); c.appendChild(nm);
+      var t = document.createElement('div'); t.className = 'hg-time';
+      var p = document.createElement('div'); p.className = 'hg-title';
+      r.appendChild(c); r.appendChild(t); r.appendChild(p);
+      fillGuideRow(r, ch, now);
+      frag.appendChild(r);
+    });
+    el.hgList.innerHTML = '';
+    el.hgList.appendChild(frag);
+    updateClock();
+
+    // Preferiti: fino a 8 loghi
+    var ft = $('hf-tiles');
+    ft.innerHTML = '';
+    if (!favs.length) {
+      var e = document.createElement('div'); e.className = 'tiles-empty';
+      e.textContent = 'Premi Menu o il tasto Rosso su un canale per aggiungerlo ai preferiti.';
+      ft.appendChild(e);
+    }
+    favs.slice(0, 8).forEach(function (ch) {
+      var d = document.createElement('div');
+      d.className = 'ftile focusable';
+      d.setAttribute('data-action', 'homePlay');
+      d.setAttribute('data-url', ch.url);
+      var lg = document.createElement('div'); lg.className = 'ft-logo'; fillLogo(lg, ch);
+      var nm = document.createElement('div'); nm.className = 'ft-name'; nm.textContent = ch.title;
+      d.appendChild(lg); d.appendChild(nm);
+      ft.appendChild(d);
+    });
+
+    // Categorie: le 8 più grandi
+    var ct = $('hc-tiles');
+    ct.innerHTML = '';
+    state.groups.slice().sort(function (x, y) { return y.count - x.count; }).slice(0, 8).forEach(function (g) {
+      var d = document.createElement('div');
+      d.className = 'ctile focusable';
+      d.setAttribute('data-action', 'homeGroup');
+      d.setAttribute('data-group', g.id);
+      d.innerHTML = Icons.svg(catIcon(g.name));
+      var nm = document.createElement('div'); nm.className = 'ct-name'; nm.textContent = g.name;
+      d.appendChild(nm);
+      ct.appendChild(d);
+    });
+
+    // Continua a guardare: l'ultimo canale visto
+    var kb = $('hk-body');
+    kb.innerHTML = '';
+    var last = channelByUrl(Store.get('lastChannel', ''));
+    if (!last) {
+      var k0 = document.createElement('div'); k0.className = 'tiles-empty'; k0.textContent = 'Qui trovi l\'ultimo canale che hai guardato.';
+      kb.appendChild(k0);
+    } else {
+      var card = document.createElement('div'); card.className = 'kcard';
+      var kl = document.createElement('div'); kl.className = 'k-logo'; fillLogo(kl, last);
+      var kn = document.createElement('div'); kn.className = 'k-name'; kn.textContent = last.title;
+      var nn = EPG.nowNext(last.epg, now);
+      var kp = document.createElement('div'); kp.className = 'k-now'; kp.textContent = nn.now ? nn.now[2] : (last.groups[0] || '');
+      var go = document.createElement('button'); go.className = 'btn primary focusable k-go';
+      go.setAttribute('data-action', 'homePlay'); go.setAttribute('data-url', last.url);
+      setIc(go, 'play', 'Guarda ora');
+      card.appendChild(kl); card.appendChild(kn); card.appendChild(kp); card.appendChild(go);
+      kb.appendChild(card);
+    }
+  }
+
+  function fillGuideRow(r, ch, now) {
+    var nn = EPG.nowNext(ch.epg, now);
+    r.querySelector('.hg-time').textContent = nn.now ? hhmm(nn.now[0]) + ' – ' + hhmm(nn.now[1]) : '';
+    r.querySelector('.hg-title').textContent = nn.now ? nn.now[2] : ch.title;
+    r.classList.toggle('playing', !!(state.pv.ch && state.pv.ch.url === ch.url));
+  }
+
+  function refreshHome() {
+    if (el.home.classList.contains('hidden')) return;
+    var now = Date.now();
+    Array.prototype.forEach.call(el.hgList.children, function (r) {
+      var ch = channelByUrl(r.getAttribute('data-url'));
+      if (ch) fillGuideRow(r, ch, now);
+    });
+    fillPreviewInfo();
+  }
+
+  var DAYS = ['Dom', 'Lun', 'Mar', 'Mer', 'Gio', 'Ven', 'Sab'];
+  var MONTHS = ['Gen', 'Feb', 'Mar', 'Apr', 'Mag', 'Giu', 'Lug', 'Ago', 'Set', 'Ott', 'Nov', 'Dic'];
+  function updateClock() {
+    var d = new Date();
+    el.clock.textContent = hhmm(d.getTime());
+    var hd = $('hg-date');
+    if (hd) hd.textContent = DAYS[d.getDay()] + ' ' + d.getDate() + ' ' + MONTHS[d.getMonth()] + '   ' + hhmm(d.getTime());
+  }
+
+  // ---------- anteprima (senza audio: OK la apre a schermo intero)
+  function fillPreviewInfo() {
+    var ch = state.pv.ch, p = el.pvPanel;
+    p.classList.toggle('empty', !ch);
+    if (!ch) return;
+    fillLogo(p.querySelector('.pv-logo'), ch);
+    p.querySelector('.pv-name').textContent = ch.num + '  ' + ch.title;
+    var nn = EPG.nowNext(ch.epg, Date.now());
+    p.querySelector('.pv-now').textContent = nn.now ? hhmm(nn.now[0]) + ' – ' + hhmm(nn.now[1]) + '   ' + nn.now[2] : '';
+    var bar = p.querySelector('.pv-prog i');
+    bar.style.width = nn.now ? Math.max(0, Math.min(100, (Date.now() - nn.now[0]) / (nn.now[1] - nn.now[0]) * 100)) + '%' : '0';
+  }
+
+  function previewStop() {
+    var pv = state.pv;
+    clearTimeout(pv.timer);
+    if (pv.hls) { try { pv.hls.destroy(); } catch (e) { /* ignora */ } pv.hls = null; }
+    var v = el.pvVideo;
+    try { v.pause(); } catch (e) { /* ignora */ }
+    v.removeAttribute('src');
+    try { v.load(); } catch (e) { /* ignora */ }
+    pv.playingUrl = '';
+    el.pvPanel.classList.remove('loading');
+  }
+
+  function previewPlay(ch) {
+    var pv = state.pv;
+    pv.ch = ch;
+    fillPreviewInfo();
+    Array.prototype.forEach.call(el.hgList.children, function (r) { r.classList.toggle('playing', r.getAttribute('data-url') === ch.url); });
+    if (background || state.screen !== 'browse' || el.home.classList.contains('hidden')) return;
+    if (pv.playingUrl === ch.url) return;
+    previewStop();
+    pv.ch = ch;
+    if (blockedLan(ch.url)) return;
+    pv.playingUrl = ch.url;
+    var v = el.pvVideo;
+    el.pvPanel.classList.add('loading');
+    v.onplaying = function () { el.pvPanel.classList.remove('loading'); };
+    if (/\.m3u8?(\?|$)|\/hls\/|m3u8/i.test(ch.url) && hlsJsSupported()) {
+      var Hls = window.Hls;
+      var hls = new Hls({ capLevelToPlayerSize: true, startLevel: 0, maxBufferLength: 10, maxMaxBufferLength: 15,
+        backBufferLength: 0, maxBufferSize: 15 * 1000 * 1000, manifestLoadingMaxRetry: 1, fragLoadingMaxRetry: 2 });
+      pv.hls = hls;
+      hls.on(Hls.Events.ERROR, function (e, d) { if (d.fatal && pv.hls === hls) { previewStop(); } });
+      hls.on(Hls.Events.MANIFEST_PARSED, function () { var p = v.play(); if (p && p.catch) p.catch(function () {}); });
+      hls.loadSource(ch.url);
+      hls.attachMedia(v);
+    } else {
+      v.src = ch.url;
+      var p = v.play(); if (p && p.catch) p.catch(function () {});
+    }
+  }
+
+  // Controllo aggiornamenti: legge un file statico pubblico (nessun dato inviato: niente cookie, niente referrer).
+  // Se c'è una versione nuova compare il pulsante accanto a Impostazioni; non succede altro finché non lo premi.
+  function newerVersion(a, b) {
+    a = String(a).split('.'); b = String(b).split('.');
+    for (var i = 0; i < 3; i++) { var x = +a[i] || 0, y = +b[i] || 0; if (x !== y) return x > y; }
+    return false;
+  }
+
+  function checkUpdate(force) {
+    if (!state.updCheck || !window.fetch) return;
+    var now = Date.now();
+    if (!force && now - state.updLast < 60 * 60e3) return;                    // al massimo una volta l'ora
+    state.updLast = now;
+    fetch(VERSION_URL + '?v=' + Math.floor(now / 600000), { credentials: 'omit', cache: 'no-store', referrerPolicy: 'no-referrer' })
+      .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+      .then(function (v) {
+        if (!v || typeof v.version !== 'string' || !/^\d+\.\d+\.\d+$/.test(v.version) || !newerVersion(v.version, APP_VERSION)) {
+          state.update = null; el.updBtn.classList.add('hidden'); return;
+        }
+        var apk = v.apk && typeof v.apk.url === 'string' && v.apk.url.indexOf(UPDATE_PREFIX) === 0 &&
+          /^[0-9a-f]{64}$/.test(v.apk.sha256 || '') ? { url: v.apk.url, sha256: v.apk.sha256 } : null;
+        state.update = { version: v.version, apk: apk };
+        setIc(el.updBtn, 'refresh', 'Aggiornamento ' + v.version);
+        el.updBtn.classList.remove('hidden');
+      }, function () { /* niente rete o file assente: si riprova più tardi */ });
+  }
+
+  function installUpdate() {
+    var u = state.update;
+    if (!u) return;
+    var S = platform === 'android' ? capPlugin('Screen') : null;
+    if (S && S.installUpdate && u.apk) {
+      toast('Scarico la versione ' + u.version + '…', 10000);
+      S.installUpdate({ url: u.apk.url, sha256: u.apk.sha256 }).then(function () {
+        toast('Conferma l\'installazione: BTV si riapre aggiornata', 6000);
+      }, function (e) {
+        var msg = e && e.message || '';
+        if (msg === 'PERMESSO') toast('Consenti a BTV di installare aggiornamenti (si è aperta l\'impostazione), poi premi di nuovo Aggiornamento', 9000);
+        else toast('Aggiornamento non riuscito: ' + msg, 6000);
+      });
+    } else if (platform === 'web') {
+      location.reload();
+    } else {
+      toast('Nuova versione ' + u.version + ': aggiornala dal PC con lo script di installazione', 7000);
+    }
+  }
+
   function setChannels(list) {
     list.forEach(function (ch, i) {
       ch.num = parseInt(ch.chno, 10) || (i + 1);
       ch.title = cleanName(ch.name);
     });
     state.channels = list;
-    state.playlistEpg = list.epgUrls || [];
+    state.playlistEpg = (list.epgUrls || []).filter(function (u) { return /^https?:\/\//i.test(u) && !blockedLan(u); });
     var counts = {};
     list.forEach(function (ch) { ch.groups.forEach(function (g) { counts[g] = (counts[g] || 0) + 1; }); });
     state.groups = Object.keys(counts).sort(function (a, b) { return a.localeCompare(b); })
       .map(function (g) { return { id: g, name: g, count: counts[g] }; });
-    if (state.group !== '__all' && state.group !== '__fav' && !counts[state.group]) state.group = '__all';
+    if (state.group !== '__all' && state.group !== '__fav' && state.group !== '__home' && !counts[state.group]) state.group = '__home';
     renderGroups();
     applyFilter();
     if (state.screen === 'browse') {
@@ -379,15 +661,13 @@
       if (!c || !document.body.contains(c)) Nav.setRoot(el.screens.browse, el.grid.children[0] || activeGroupEl());
     }
     if (list.length) loadEpg(false);
-    // All'avvio riparte dall'ultimo canale visto (come una TV); si disattiva nelle Impostazioni.
+    // All'avvio l'ultimo canale visto riparte nell'anteprima della Home (senza audio): lo schermo intero
+    // si apre solo quando lo chiedi tu (OK). Si disattiva nelle Impostazioni.
     if (!state.resumed && list.length) {
       state.resumed = true;
-      var last = Store.get('lastChannel', null);
-      var li = -1;
-      for (var k = 0; last && k < list.length; k++) if (list[k].url === last) { li = k; break; }
-      if (state.resumeLast && li >= 0 && state.screen === 'browse') {
-        Nav.setRoot(el.screens.browse, focusCardFor(list[li]) || el.grid.children[0]);
-        openPlayer(list, li);
+      if (state.screen === 'browse' && !el.home.classList.contains('hidden')) {
+        if (!state.resumeLast) { previewStop(); state.pv.ch = null; fillPreviewInfo(); }
+        Nav.setRoot(el.screens.browse, el.pvPanel);
       }
     }
   }
@@ -411,13 +691,7 @@
     return urls;
   }
 
-  function guideText(bytes) {
-    if (bytes[0] === 0x1f && bytes[1] === 0x8b) {
-      if (!window.pako) throw new Error('gzip non supportato');
-      bytes = window.pako.ungzip(bytes);
-    }
-    return new TextDecoder('utf-8').decode(bytes);
-  }
+  function guideText(bytes) { return EPG.toText(bytes, window.pako); }
 
   // Analisi in un Web Worker (l'interfaccia resta fluida); se non disponibile, sul thread principale.
   var epgWorker = null, epgWorkerBroken = false;
@@ -562,15 +836,16 @@
   function renderGroups() {
     el.groups.innerHTML = '';
     var items = [
+      { id: '__home', name: 'Home', icon: 'home', count: '' },
       { id: '__fav', name: 'Preferiti', icon: 'starf', count: favCount() },
-      { id: '__all', name: 'Tutti i canali', count: state.channels.length }
+      { id: '__all', name: 'Tutti i canali', icon: 'tv', count: state.channels.length }
     ].concat(state.groups);
     items.forEach(function (g) {
       var b = document.createElement('div');
       b.className = 'group focusable' + (g.id === state.group ? ' active' : '');
       b.setAttribute('data-group', g.id);
       var n = document.createElement('span'); n.className = 'gname';
-      if (g.icon) setIc(n, g.icon, g.name); else n.textContent = g.name;
+      setIc(n, g.icon || 'folder', g.name);
       var c = document.createElement('span'); c.className = 'gcount'; c.textContent = g.count;
       b.appendChild(n); b.appendChild(c);
       el.groups.appendChild(b);
@@ -592,6 +867,8 @@
 
   function applyFilter() {
     if (!activePlaylist()) { showWelcome(); return; }   // nessuna playlist: resta il benvenuto
+    if (state.group === '__home' && !state.query) { showHome(); return; }
+    hideHome();
     var q = state.query.toLowerCase();
     var g = state.group;
     state.filtered = state.channels.filter(function (ch) {
@@ -666,19 +943,20 @@
         if (dir === 'right') {
           clearTimeout(state.timers.group);
           selectGroup(from.getAttribute('data-group'));
-          return el.grid.children[0] || el.search;
+          return firstMainItem() || el.search;
         }
         if (dir === 'up' && !from.previousSibling) return false;
         if (dir === 'down' && !from.nextSibling) return false;
         if (dir === 'up') return from.previousSibling;
         if (dir === 'down') return from.nextSibling;
       }
-      if (from === el.search || from === el.multiBtn || from === el.settingsBtn) {
-        if (dir === 'down') return el.grid.children[0] || activeGroupEl();
+      var top = [el.search, el.multiBtn, el.updBtn, el.settingsBtn].filter(function (x) { return x && !x.classList.contains('hidden'); });
+      var ti = top.indexOf(from);
+      if (ti >= 0) {
+        if (dir === 'down') return firstMainItem() || activeGroupEl();
         if (dir === 'up') return false;
-        if (from === el.search) return dir === 'left' ? activeGroupEl() : el.multiBtn;
-        if (from === el.multiBtn) return dir === 'left' ? el.search : el.settingsBtn;
-        return dir === 'left' ? el.multiBtn : false;
+        if (dir === 'left') return ti > 0 ? top[ti - 1] : activeGroupEl();
+        return top[ti + 1] || false;
       }
     }
     if (state.screen === 'player' && (dir === 'up' || dir === 'down')) return false;
@@ -689,6 +967,10 @@
   function onFocusChange() {
     var c = Nav.current();
     clearTimeout(state.timers.group);
+    clearTimeout(state.pv.timer);
+    if (c && c.getAttribute('data-url') && c.classList.contains('hg-row')) {
+      state.pv.timer = setTimeout(function () { var ch = channelByUrl(c.getAttribute('data-url')); if (ch) previewPlay(ch); }, 700);
+    }
     if (c && c.classList.contains('group')) {
       state.timers.group = setTimeout(function () { selectGroup(c.getAttribute('data-group')); }, 280);
     }
@@ -719,6 +1001,9 @@
     if (name === 'player') Nav.setRoot(el.osd, null);
     else Nav.setRoot(el.screens[name], focusEl);
     keepScreenOn(name === 'player' || name === 'multi');
+    if (name !== 'browse') previewStop();
+    else if (state.group === '__home' && !el.home.classList.contains('hidden') && state.pv.ch) previewPlay(state.pv.ch);
+    if (name === 'browse') checkUpdate(false);
   }
 
   function openSettings() {
@@ -807,6 +1092,11 @@
   function startStream(ch) {
     stopStream();
     el.perr.classList.add('hidden');
+    if (blockedLan(ch.url)) {
+      el.perr.querySelector('.perr-msg').textContent = 'Questo canale punta a un dispositivo della tua rete di casa: bloccato per sicurezza.';
+      el.perr.classList.remove('hidden');
+      return;
+    }
     el.spinner.classList.add('on');
     state.fallbackTried = false; state.netRetry = false; state.mediaRetry = false;
     state.userShift = false;
@@ -998,6 +1288,8 @@
   }
 
   function updateTrackButtons() {
+    var pipBtn = $('osd-pip');
+    if (pipBtn) pipBtn.classList.toggle('hidden', !(document.pictureInPictureEnabled && platform === 'web' && !el.video.disablePictureInPicture));
     var h = state.mode === 'hlsjs' ? state.hls : null;
     var a = h && h.audioTracks || [], s = h && h.subtitleTracks || [];
     el.osdAudio.classList.toggle('hidden', a.length < 2);
@@ -1352,7 +1644,8 @@
   function maxTiles() { return state.multiPref || deviceTiles(); }
 
   function updateOptLabels() {
-    setIc(el.optResume, 'play', 'All\'avvio: ' + (state.resumeLast ? 'ultimo canale' : 'elenco canali'));
+    setIc(el.optResume, 'play', 'Anteprima in Home: ' + (state.resumeLast ? 'ultimo canale' : 'spenta'));
+    setIc(el.optUpd, 'refresh', 'Controllo aggiornamenti: ' + (state.updCheck ? 'attivo' : 'disattivato'));
     setIc(el.optDead, 'warning', 'Canali non funzionanti: ' + (state.hideDead ? 'nascosti' : 'visibili (attenuati)'));
   }
 
@@ -1578,6 +1871,7 @@
       t.video.addEventListener('playing', function () { clearTimeout(t.timer); t.el.classList.remove('loading'); t.played = true; });
       t.video.addEventListener('error', function () { if (t.mode === 'native' && t.video.getAttribute('src')) tileFail(+t.el.getAttribute('data-i'), 'Formato non supportato o canale offline'); });
     }
+    if (blockedLan(ch.url)) { tileFail(i, 'Bloccato: punta alla rete di casa'); return; }
     if (/\.m3u8?(\?|$)|\/hls\/|m3u8/i.test(ch.url) && hlsJsSupported()) tileHls(i, ch.url);
     else tileNative(i, ch.url);
     t.timer = setTimeout(function () {
@@ -1632,6 +1926,12 @@
     var m = state.multi; if (!m) return;
     m.tiles.forEach(function (t, i) {
       t.video.muted = i !== m.focus;
+      if (t.hls) {
+        try {
+          t.hls.capLevelToPlayerSize = i === m.focus;
+          t.hls.autoLevelCapping = i === m.focus ? -1 : 0;
+        } catch (e) { /* versione di hls.js senza queste opzioni */ }
+      }
       t.el.classList.toggle('audio', i === m.focus && !!t.ch);
     });
   }
@@ -2014,6 +2314,14 @@
       state.dead = {}; Store.set('dead', {}); applyFilter(); toast('Tutti i canali verranno riprovati');
     },
     toggleFavPlaying: function () { toggleFav(state.playing); showOsd(true); },
+    // Picture in picture: il video resta in un riquadro sopra le altre app (browser di telefono e PC).
+    pip: function () {
+      var v = el.video;
+      try {
+        if (document.pictureInPictureElement) document.exitPictureInPicture();
+        else if (v.requestPictureInPicture) v.requestPictureInPicture().catch(function () { toast('Picture in picture non disponibile qui'); });
+      } catch (e) { toast('Picture in picture non disponibile qui'); }
+    },
     seekBack: function () { seekBy(-SEEK_STEP); showOsd(true); },
     seekFwd: function () { seekBy(SEEK_STEP); showOsd(true); },
     togglePause: function () { togglePause(); showOsd(true); },
@@ -2041,6 +2349,29 @@
       toast('Playlist eliminata');
     },
     openPair: function () { openPair(); },
+    previewFull: function () {
+      var ch = state.pv.ch;
+      if (!ch) return;
+      var i = state.channels.indexOf(ch);
+      previewStop();
+      openPlayer(state.channels, i < 0 ? 0 : i);
+    },
+    homePlay: function (b) {
+      var ch = channelByUrl(b.getAttribute('data-url'));
+      if (!ch) return;
+      var i = state.channels.indexOf(ch);
+      previewStop();
+      openPlayer(state.channels, i < 0 ? 0 : i);
+    },
+    homeGroup: function (b) {
+      selectGroup(b.getAttribute('data-group'));
+      Nav.focus(firstMainItem() || activeGroupEl());
+    },
+    installUpdate: function () { installUpdate(); },
+    toggleUpdCheck: function () {
+      state.updCheck = !state.updCheck; Store.set('updCheck', state.updCheck); updateOptLabels();
+      if (state.updCheck) checkUpdate(true); else { state.update = null; el.updBtn.classList.add('hidden'); }
+    },
     openLogin: function () { openSettings(); Nav.setRoot(el.screens.settings, $('xt-server')); $('xt-server').scrollIntoView(); },
     addXtream: function () {
       var p = addXtream($('xt-server').value, $('xt-user').value.trim(), $('xt-pass').value, '');
@@ -2099,7 +2430,7 @@
     if (target.classList.contains('group')) {
       clearTimeout(state.timers.group);
       selectGroup(target.getAttribute('data-group'));
-      if (el.grid.children[0]) Nav.focus(el.grid.children[0]);
+      var fm = firstMainItem(); if (fm) Nav.focus(fm);
       return;
     }
     var a = target.getAttribute('data-action');
@@ -2121,6 +2452,7 @@
     var c = Nav.current();
     if (state.query) { state.query = ''; el.search.value = ''; applyFilter(); return; }
     if (c && c.classList.contains('card')) { Nav.focus(activeGroupEl()); return; }
+    if (activePlaylist() && state.group !== '__home') { selectGroup('__home'); Nav.focus(el.pvPanel); return; }
     var now = Date.now();
     if (now - state.lastBack < 2500) { exitApp(); return; }
     state.lastBack = now;
@@ -2261,11 +2593,14 @@
 
   // ---------------------------------------------------------------- Avvio
   Icons.hydrate();
+  $('side-ver').textContent = 'Versione ' + APP_VERSION;
+  updateClock();
   Nav.setCustom(customNav);
   registerTvKeys();
   document.body.classList.add('platform-' + platform);
   window.BTV = { state: state };                                     // utile per il debug dalla console
-  setInterval(refreshEpgViews, 60000);                                    // "in onda" aggiornato ogni minuto
+  setInterval(refreshEpgViews, 60000);
+  setInterval(function () { updateClock(); refreshHome(); }, 30000);                                    // "in onda" aggiornato ogni minuto
   setInterval(function () {
     if (state.screen === 'player') { if (osdVisible()) updateShift(); updateLiveBadge(); playerWatchdog(); }
     else el.liveBadge.classList.add('hidden');
@@ -2273,4 +2608,5 @@
   }, 1000);
   show('browse', el.search);
   loadActive();
+  setTimeout(function () { checkUpdate(true); }, 4000);                   // all'avvio
 })();

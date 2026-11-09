@@ -27,13 +27,13 @@ $androidCli = "$sdk\cmdline-tools\latest\bin\android.exe"
 Write-Host "Installo platform-tools, Android 15 (API 35) e build-tools 35..." -ForegroundColor Cyan
 if (Test-Path $androidCli) {
   # Nuovo "Android CLI" di Google (2026): sintassi con "/" e licenze accettate durante l'installazione.
-  & $androidCli "--sdk=$sdk" sdk install platform-tools platforms/android-35 build-tools/35.0.0
+  & $androidCli "--sdk=$sdk" sdk install platform-tools platforms/android-36 build-tools/36.0.0
 } else {
   Write-Host "Licenze dell'Android SDK di Google: leggile e rispondi 'y' per accettarle." -ForegroundColor Yellow
   & $sdkmanager "--sdk_root=$sdk" --licenses
-  & $sdkmanager "--sdk_root=$sdk" "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+  & $sdkmanager "--sdk_root=$sdk" "platform-tools" "platforms;android-36" "build-tools;36.0.0"
 }
-if (-not (Test-Path "$sdk\platforms\android-35") -or -not (Test-Path "$sdk\build-tools\35.0.0")) {
+if (-not (Test-Path "$sdk\platforms\android-36") -or -not (Test-Path "$sdk\build-tools\36.0.0")) {
   Write-Host "Installazione dei componenti non riuscita: controlla i messaggi sopra." -ForegroundColor Red; exit 1
 }
 

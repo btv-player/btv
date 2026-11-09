@@ -15,7 +15,7 @@ if (!fs.existsSync(path.join(root, 'www', 'vendor', 'hls.min.js'))) {
   console.error('Manca www/vendor/hls.min.js: esegui "npm install".');
   process.exit(1);
 }
-if (!fs.existsSync(path.join(assets, 'icon-512.png'))) require('./make-icons.js');
+if (!fs.existsSync(path.join(assets, 'icon-512.png'))) { console.error('Mancano le icone: esegui tools/make-icons.ps1'); process.exit(1); }
 
 fs.rmSync(dist, { recursive: true, force: true });
 fs.cpSync(path.join(root, 'www'), dist, { recursive: true });

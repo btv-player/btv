@@ -66,6 +66,20 @@ var Icons = (function () {
     fullscreen: '<path d="M4 9V5a1 1 0 0 1 1-1h4M15 4h4a1 1 0 0 1 1 1v4M20 15v4a1 1 0 0 1-1 1h-4M9 20H5a1 1 0 0 1-1-1v-4"/>',
     swap: '<path d="M4 8h15M15.5 4.5L19 8l-3.5 3.5M20 16H5M8.5 12.5L5 16l3.5 3.5"/>',
     phone: '<rect x="6.5" y="2.5" width="11" height="19" rx="2.5"/><path d="M10.5 18h3"/>',
+    home: '<path d="M3.5 11L12 4l8.5 7"/><path d="M6 9.5V20h12V9.5"/><path d="M10 20v-5.5h4V20"/>',
+    folder: '<path d="M3 7.2A2.2 2.2 0 0 1 5.2 5H9l2 2.2h7.8A2.2 2.2 0 0 1 21 9.4v8.4a2.2 2.2 0 0 1-2.2 2.2H5.2A2.2 2.2 0 0 1 3 17.8z"/>',
+    chevron: '<path d="M9.5 5.5L16 12l-6.5 6.5"/>',
+    arrow: '<path d="M4 12h15M13.5 6.5L19 12l-5.5 5.5"/>',
+    bell: '<path d="M6 16.5V11a6 6 0 0 1 12 0v5.5l1.5 1.5h-15z"/><path d="M10 20.5a2.2 2.2 0 0 0 4 0"/>',
+    tv: '<rect x="3" y="7" width="18" height="13" rx="2.5"/><path d="M8.5 3l3.5 4 3.5-4"/>',
+    trophy: '<path d="M8 4h8v5.5a4 4 0 0 1-8 0z"/><path d="M8 6H4.5v1.5A3.5 3.5 0 0 0 8 11M16 6h3.5v1.5A3.5 3.5 0 0 1 16 11M12 13.5V17M8.5 20.5h7M9.5 17h5v3.5h-5z"/>',
+    film: '<rect x="3.5" y="4" width="17" height="16" rx="2.2"/><path d="M8 4v16M16 4v16M3.5 9H8M3.5 15H8M16 9h4.5M16 15h4.5"/>',
+    music: '<path d="M9 18V6l11-2v12"/><circle cx="6.5" cy="18" r="2.5"/><circle cx="17.5" cy="16" r="2.5"/>',
+    smile: '<circle cx="12" cy="12" r="8.5"/><path d="M8.5 14a4.5 4.5 0 0 0 7 0"/><circle cx="9" cy="9.8" r="1.1"' + F + '/><circle cx="15" cy="9.8" r="1.1"' + F + '/>',
+    doc: '<path d="M6 3.5h8l4 4V20.5H6z"/><path d="M14 3.5v4h4M9 12h6M9 15.5h6"/>',
+    news: '<rect x="3.5" y="5" width="17" height="14" rx="2"/><path d="M7 9h6M7 12.5h10M7 16h10M15.5 8.5h1.5v1.5h-1.5z"/>',
+    radio: '<rect x="3" y="8" width="18" height="12" rx="2.5"/><path d="M7 8l10-4.5"/><circle cx="15.5" cy="14" r="2.6"/><path d="M6.5 12.5h4M6.5 15.5h4"/>',
+    globe: '<circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c2.6 2.4 3.8 5.2 3.8 8.5s-1.2 6.1-3.8 8.5c-2.6-2.4-3.8-5.2-3.8-8.5S9.4 5.9 12 3.5z"/>',
     offline: '<path d="M2.5 8.8a14 14 0 0 1 6.3-3.2M12 5a14 14 0 0 1 9.5 3.8M5.5 12.2a9.5 9.5 0 0 1 3.6-2M15 10.4a9.5 9.5 0 0 1 3.5 1.8M8.8 15.4a4.6 4.6 0 0 1 6.4 0"/>' +
              '<circle cx="12" cy="19" r="1.2"' + F + '/><path d="M3.5 3.5l17 17"/>'
   };

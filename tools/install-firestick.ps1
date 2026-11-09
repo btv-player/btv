@@ -33,7 +33,6 @@ if ($out -match 'UPDATE_INCOMPATIBLE|signatures do not match') {
 }
 if ($out -notmatch 'Success') { Write-Host "Installazione non riuscita." -ForegroundColor Red; exit 1 }
 
-Write-Host "Avvio l'app..." -ForegroundColor Cyan
-& $adb -s $Ip shell monkey -p app.btv.player -c android.intent.category.LEANBACK_LAUNCHER 1 | Out-Null
+# Non apro l app da sola: la trovi in App sulla Fire TV quando vuoi tu.
 Write-Host "Fatto! BTV è installata: la trovi anche in 'App' sulla Fire TV." -ForegroundColor Green
 Write-Host "Sicurezza: quando hai finito, rimetti 'Debug ADB' su OFF nelle Opzioni sviluppatore della Fire TV." -ForegroundColor Yellow

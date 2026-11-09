@@ -175,6 +175,27 @@ var EPG = (function () {
     return out;
   }
 
-  return { parse: parse, match: match, nowNext: nowNext, currentIndex: currentIndex, compact: compact, keys: keys, parseTime: parseTime };
+  // Bytes della guida -> testo. Se è gzip la decompressione si ferma oltre MAX_XML (protegge da file "bomba").
+  var MAX_XML = 160 * 1024 * 1024;
+  function toText(bytes, pk) {
+    if (bytes[0] === 0x1f && bytes[1] === 0x8b) {
+      if (!pk) throw new Error('gzip non supportato');
+      var inf = new pk.Inflate(), parts = [], total = 0;
+      inf.onData = function (chunk) {
+        total += chunk.length;
+        if (total > MAX_XML) throw new Error('guida troppo grande');
+        parts.push(chunk);
+      };
+      inf.push(bytes, true);
+      if (inf.err) throw new Error(inf.msg || 'gzip non valido');
+      var out = new Uint8Array(total), off = 0;
+      for (var i = 0; i < parts.length; i++) { out.set(parts[i], off); off += parts[i].length; }
+      bytes = out;
+    }
+    if (bytes.length > MAX_XML) throw new Error('guida troppo grande');
+    return new TextDecoder('utf-8').decode(bytes);
+  }
+
+  return { toText: toText, parse: parse, match: match, nowNext: nowNext, currentIndex: currentIndex, compact: compact, keys: keys, parseTime: parseTime };
 })();
 if (typeof module !== 'undefined') module.exports = EPG;

@@ -4,18 +4,12 @@
   "webDir": "www",
   "android": {
     "allowMixedContent": true,
-    "backgroundColor": "#0b0d12"
+    "backgroundColor": "#0b0d12",
+    "webContentsDebuggingEnabled": false
   },
   "plugins": {
     "CapacitorHttp": {
       "enabled": false
     }
-  },
-  "server": {
-    "url": "https://btv-player.github.io/btv/player.html",
-    "errorPath": "offline.html",
-    "allowNavigation": [
-      "btv-player.github.io"
-    ]
   }
 }

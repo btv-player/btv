@@ -16,7 +16,7 @@ if (-not $jdk) { Write-Host "Java 21 non trovato: esegui prima tools\setup-andro
 $env:JAVA_HOME = $jdk.FullName
 $env:ANDROID_HOME = "$env:LOCALAPPDATA\Android\Sdk"
 $env:Path = "$($jdk.FullName)\bin;$env:ANDROID_HOME\platform-tools;$env:Path"
-if (-not (Test-Path "$env:ANDROID_HOME\platforms\android-35")) { Write-Host "Android SDK mancante: esegui prima tools\setup-android.ps1" -ForegroundColor Red; exit 1 }
+if (-not (Test-Path "$env:ANDROID_HOME\platforms\android-36")) { Write-Host "Android SDK mancante: esegui prima tools\setup-android.ps1" -ForegroundColor Red; exit 1 }
 
 function Read-Secret([string]$prompt) {
   $s = Read-Host $prompt -AsSecureString
@@ -68,6 +68,7 @@ try {
   New-Item -ItemType Directory -Force dist | Out-Null
   $out = if ($Debug) { "android\app\build\outputs\apk\debug\app-debug.apk" } else { "android\app\build\outputs\apk\release\app-release.apk" }
   Copy-Item $out dist\BTV.apk -Force
+  (Get-FileHash dist\BTV.apk -Algorithm SHA256).Hash.ToLower() | Set-Content -Encoding ascii dist\BTV.apk.sha256
   $mb = [math]::Round((Get-Item dist\BTV.apk).Length / 1MB, 1)
   $kind = if ($Debug) { "di prova" } else { "definitivo firmato" }
   Write-Host ""

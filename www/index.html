@@ -5,6 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>BTV</title>
   <meta name="robots" content="noindex, nofollow">
+  <!-- Solo codice dell'app: nessuno script esterno, niente frame, niente plugin. Video, immagini e playlist da qualsiasi server. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src * data: blob:; media-src * data: blob:; connect-src *; worker-src 'self' blob:; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'">
+  <meta name="referrer" content="no-referrer">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -13,19 +16,56 @@
   <!-- ===== Schermata elenco canali ===== -->
   <section id="browse" class="screen active">
     <aside id="sidebar">
-      <div class="brand"><span class="brand-mark">B</span>BTV</div>
+      <div class="brand"><img class="brand-logo" src="icon.png" alt="BTV"></div>
       <nav id="groups"></nav>
+      <div class="side-info"><i data-ic="tv"></i><div><b>BTV Player</b><span id="side-ver"></span></div></div>
     </aside>
     <main id="main">
       <header id="topbar">
-        <input id="search" class="focusable" type="text" placeholder="Cerca canale…" autocomplete="off" spellcheck="false">
+        <div class="search-wrap"><i data-ic="search"></i><input id="search" class="focusable" type="text" placeholder="Cerca un canale…" autocomplete="off" spellcheck="false"></div>
+        <div class="top-space"></div>
         <div id="playlist-name"></div>
-        <button id="btn-multi" class="btn focusable" data-action="openMulti"><i data-ic="multi"></i>Multivisione</button>
-        <button id="btn-settings" class="btn focusable" data-action="openSettings"><i data-ic="settings"></i>Impostazioni</button>
+        <div id="clock"></div>
+        <button id="btn-multi" class="ibtn focusable" data-action="openMulti" title="Multivisione"><i data-ic="multi"></i></button>
+        <button id="btn-update" class="btn focusable primary hidden" data-action="installUpdate"></button>
+        <button id="btn-settings" class="ibtn focusable" data-action="openSettings" title="Impostazioni"><i data-ic="settings"></i></button>
       </header>
+
+      <!-- Home: anteprima, guida, preferiti, categorie, continua a guardare -->
+      <div id="home" class="hidden">
+        <div class="h-top">
+          <div id="h-preview" class="panel focusable" data-action="previewFull">
+            <video id="pv-video" muted playsinline></video>
+            <div class="pv-empty">Scegli un canale dalla guida</div>
+            <div class="pv-spin"><div class="ring"></div></div>
+            <div class="pv-live"><span></span>LIVE</div>
+            <div class="pv-info"><div class="pv-logo"></div><div class="pv-text"><div class="pv-name"></div><div class="pv-now"></div></div></div>
+            <div class="pv-bar"><i data-ic="play"></i><i data-ic="audio"></i><span class="pv-prog"><i></i></span><span class="pv-red">LIVE</span><span class="pv-hint">OK: schermo intero</span><i data-ic="fullscreen"></i></div>
+          </div>
+          <div id="h-guide" class="panel">
+            <div class="ph"><i data-ic="guide"></i><span class="ph-t">Guida TV</span><span class="ph-date" id="hg-date"></span></div>
+            <div id="hg-list"></div>
+          </div>
+        </div>
+        <div class="h-bottom">
+          <div class="panel" id="h-favs">
+            <div class="ph"><i data-ic="starf"></i><span class="ph-t">I tuoi preferiti</span><button class="ph-more focusable" data-action="homeGroup" data-group="__fav">Vedi tutti<i data-ic="arrow"></i></button></div>
+            <div class="tiles" id="hf-tiles"></div>
+          </div>
+          <div class="panel" id="h-cats">
+            <div class="ph"><i data-ic="folder"></i><span class="ph-t">Categorie</span><button class="ph-more focusable" data-action="homeGroup" data-group="__all">Vedi tutte<i data-ic="arrow"></i></button></div>
+            <div class="tiles" id="hc-tiles"></div>
+          </div>
+          <div class="panel" id="h-cont">
+            <div class="ph"><i data-ic="play"></i><span class="ph-t">Continua a guardare</span></div>
+            <div id="hk-body"></div>
+          </div>
+        </div>
+      </div>
+
       <div id="status"></div>
       <div id="grid"></div>
-      <div id="hint">OK: guarda · Play / Info / Verde: guida del canale · Menu / Rosso: preferito · Indietro: esci</div>
+      <div id="hint">OK: guarda · Play / Info / Verde: guida del canale · Menu / Rosso: preferito · Indietro: torna alla Home</div>
     </main>
   </section>
 
@@ -69,6 +109,7 @@
         <button class="btn focusable" id="osd-quality" data-action="cycleQuality"><i data-ic="quality"></i>Auto</button>
         <button class="btn focusable hidden" id="osd-audio" data-action="cycleAudio"><i data-ic="audio"></i>Audio</button>
         <button class="btn focusable hidden" id="osd-subs" data-action="cycleSubs"><i data-ic="subs"></i>No</button>
+        <button class="btn focusable hidden" id="osd-pip" data-action="pip" title="Riquadro sopra le altre app"><i data-ic="two"></i>PiP</button>
         <button class="btn focusable" id="osd-fav" data-action="toggleFavPlaying"><i data-ic="star"></i></button>
       </div>
       <div class="osd-help">▲ ▼ cambia canale · ◀ ▶ indietro / avanti 30s · Menu: lista canali · Giallo: canale precedente · Indietro esci</div>
@@ -131,6 +172,7 @@
       <div class="form-row">
         <button class="btn focusable" id="opt-resume" data-action="toggleResume"><i data-ic="play"></i>All'avvio: ultimo canale</button>
         <button class="btn focusable" id="opt-dead" data-action="toggleHideDead"><i data-ic="warning"></i>Canali non funzionanti: visibili</button>
+        <button class="btn focusable" id="opt-update" data-action="toggleUpdCheck">Controllo aggiornamenti: attivo</button>
         <button class="btn focusable" data-action="clearDead"><i data-ic="refresh"></i>Riprova tutti i canali</button>
         <button class="btn focusable" data-action="closeSettings"><i data-ic="back"></i>Torna ai canali</button>
       </div>

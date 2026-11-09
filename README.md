@@ -145,21 +145,31 @@ powershell -ExecutionPolicy Bypass -File .\tools\install-firestick.ps1 192.168.1
 
 La prima volta sulla TV compare "Consentire il debug?": scegli **Consenti** (e "consenti sempre da questo computer").
 
-## Aggiornamenti automatici (GitHub Pages, gratis)
+## Aggiornamenti (sicuri, solo su conferma)
 
-1. Metti il progetto su GitHub (repository pubblico `btv`) e attiva Pages con *Settings → Pages → Source: GitHub Actions*:
-   il workflow `.github/workflows/pages.yml` pubblica `www/` a ogni push.
-2. Dì all'app di caricare la versione online e ricompila l'APK **una sola volta**:
+Il codice dell'app è **dentro l'app**: niente viene caricato da internet all'avvio.
+
+- All'avvio e quando torni alla Home (al massimo una volta l'ora) l'app legge `https://btv-player.github.io/btv/version.json`:
+  un file statico con il numero dell'ultima versione. Non invia nessun dato (niente cookie, niente referrer).
+- Se c'è una versione nuova compare **Aggiornamento x.y.z** accanto a Impostazioni. Non succede altro finché non lo premi.
+- Sulla Fire TV, premendolo, l'app scarica l'APK dalle release di GitHub, ne verifica l'impronta SHA-256 e apre
+  l'installatore di Android, che chiede conferma e accetta solo un APK firmato **con la tua chiave**.
+- Su LG/Samsung segnala la nuova versione: si aggiorna dal PC con lo script di installazione.
+- Il controllo si può spegnere in *Impostazioni → Controllo aggiornamenti*.
+
+Per pubblicare una nuova versione: aumenta `APP_VERSION` in `www/js/app.js`, salva le modifiche in git e poi
 
 ```bash
-node tools/set-update-url.js https://TUONOME.github.io/btv/
+powershell -ExecutionPolicy Bypass -File .\tools\publish-release.ps1
 ```
 
-3. Da quel momento: modifichi il codice → `git push` → dopo ~1 minuto la Fire TV usa la nuova versione al prossimo avvio
-   dell'app, senza reinstallare. In *Impostazioni* vedi la versione in uso (`APP_VERSION` in `www/js/app.js`).
-   Senza Internet l'app mostra una pagina "Nessuna connessione" con *Riprova*.
+(compila l'APK firmato, lo carica come release su GitHub e solo dopo pubblica `version.json`).
 
-Serve un APK nuovo solo per modifiche "native" (nome, icona, permessi, plugin Capacitor).
+## Installare BTV su altre Fire TV
+
+Sulla Fire TV: app **Downloader** (store Amazon) → *Opzioni sviluppatore → Installa app sconosciute* per Downloader →
+in Downloader scrivi `btv-player.github.io/btv/apk` (porta sempre all'ultima release). Le istruzioni sono anche nella
+pagina `https://btv-player.github.io/btv/`.
 
 ## Fire TV Stick / Android TV (APK) con Android Studio
 
