@@ -3,7 +3,7 @@
   'use strict';
 
   // ---------------------------------------------------------------- Config
-  var APP_VERSION = '1.6.0'; // aumentala a ogni aggiornamento: in Impostazioni vedi quale versione sta girando
+  var APP_VERSION = '1.6.1'; // aumentala a ogni aggiornamento: in Impostazioni vedi quale versione sta girando
   var PRESETS = [
     { id: 'it', name: 'Italia (canali gratuiti)', url: 'https://iptv-org.github.io/iptv/countries/it.m3u', preset: true },
     { id: 'news', name: 'Notizie dal mondo', url: 'https://iptv-org.github.io/iptv/categories/news.m3u', preset: true },
