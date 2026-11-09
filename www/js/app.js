@@ -3,7 +3,7 @@
   'use strict';
 
   // ---------------------------------------------------------------- Config
-  var APP_VERSION = '1.8.3'; // aumentala a ogni aggiornamento: in Impostazioni vedi quale versione sta girando
+  var APP_VERSION = '1.8.4'; // aumentala a ogni aggiornamento: in Impostazioni vedi quale versione sta girando
   var PRESETS = [];      // nessuna lista precaricata: solo quelle che aggiungi tu
   // Guide TV gratuite in formato XMLTV (si possono disattivare o aggiungerne altre nelle Impostazioni).
   var DEFAULT_EPG = [];  // nessuna guida precaricata: quella della playlist + quelle che aggiungi tu
@@ -872,27 +872,9 @@
     return n;
   }
 
-  // Icona a tema per una categoria senza loghi (dal nome).
-  function catIcon(name) {
-    var n = String(name).toLowerCase();
-    if (/sport|calcio|dazn|eurosport|basket|volley|tennis|motor|f1|golf|nba|serie a/.test(n)) return 'trophy';
-    if (/cinema|film|movie|netflix|prime|disney|apple|vod|serie/.test(n)) return 'film';
-    if (/kid|bambin|cartoon|ragazzi|junior/.test(n)) return 'smile';
-    if (/music|musica|radio|mtv/.test(n)) return 'music';
-    if (/news|notizie|tg|informazione/.test(n)) return 'news';
-    if (/doc|natura|scienza|storia|discovery/.test(n)) return 'doc';
-    if (/world|mondo|international|estero/.test(n)) return 'globe';
-    return 'tv';
-  }
-
+  // Barra laterale: Home, Preferiti e Tutti i canali in grassetto con icona; poi le categorie della playlist, solo col nome.
   function renderGroups() {
     el.groups.innerHTML = '';
-    // Logo di categoria solo se la playlist lo indica (group-logo); altrimenti un'icona a tema dal nome
-    var groupLogos = {};
-    state.channels.forEach(function (ch) {
-      if (!ch.groupLogo || !safeUrl(ch.groupLogo) || blockedLan(ch.groupLogo)) return;
-      ch.groups.forEach(function (gid) { if (!groupLogos[gid]) groupLogos[gid] = ch.groupLogo; });
-    });
     var items = [
       { id: '__home', name: 'Home', icon: 'home', count: '' },
       { id: '__fav', name: 'Preferiti', icon: 'starf', count: favCount() },
@@ -900,24 +882,10 @@
     ].concat(state.groups);
     items.forEach(function (g) {
       var b = document.createElement('div');
-      b.className = 'group focusable' + (g.id === state.group ? ' active' : '');
+      b.className = 'group focusable' + (g.icon ? ' special' : '') + (g.id === state.group ? ' active' : '');
       b.setAttribute('data-group', g.id);
       var n = document.createElement('span'); n.className = 'gname';
-      if (g.icon) setIc(n, g.icon, g.name);
-      else {
-        // Categoria: il suo logo se la playlist lo indica, altrimenti un'icona a tema
-        var lg = document.createElement('span'); lg.className = 'glogo';
-        var src = groupLogos[g.id];
-        if (src) {
-          var img = new Image(); img.alt = ''; img.setAttribute('loading', 'lazy');
-          img.onerror = function () { this.parentNode.innerHTML = Icons.svg(catIcon(this.getAttribute('data-name'))); };
-          img.setAttribute('data-name', g.name);
-          img.src = src;
-          lg.appendChild(img);
-        } else lg.innerHTML = Icons.svg(catIcon(g.name));
-        var tx = document.createElement('span'); tx.className = 'ict'; tx.textContent = g.name;
-        n.appendChild(lg); n.appendChild(tx);
-      }
+      if (g.icon) setIc(n, g.icon, g.name); else n.textContent = g.name;
       var c = document.createElement('span'); c.className = 'gcount'; c.textContent = g.count;
       b.appendChild(n); b.appendChild(c);
       el.groups.appendChild(b);

@@ -550,3 +550,25 @@ html, body { background: #050816; }
 .glogo .ic-tv, .glogo .ic-globe { color: #7fc4ff; }
 .group.active .glogo .ic, .group.focused .glogo .ic { color: #fff; }
 .group.active .glogo, .group.focused .glogo { background: transparent; }
+
+/* logo di marchio nelle cartelle: riquadro scuro come i loghi dei canali */
+.glogo img { max-width: 100%; max-height: 100%; }
+.group .glogo:has(img) { width: 3.2rem; background: rgba(255, 255, 255, .06); }
+
+/* barra laterale: voci principali in grassetto con icona, categorie solo col nome */
+.group.special .gname { font-weight: 800; color: #fff; }
+.group.special { margin-bottom: .35rem; }
+.group[data-group="__all"] { margin-bottom: 1rem; }
+.group:not(.special) .gname { padding-left: .4rem; }
+
+/* preferiti: il programma va a capo su due righe invece di tagliarsi */
+#h-favs .tile-now { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  line-height: 1.2; max-height: 2.4em; text-align: center; font-size: .95rem; }
+#h-favs .ft-name { white-space: normal; display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; text-align: center; }
+#h-favs .ftile { height: 10.4rem; justify-content: flex-start; padding-top: .6rem; }
+#h-favs .ft-logo { height: 4.2rem; }
+#h-favs .ftile { height: 8.6rem; padding-top: .45rem; margin-bottom: 1.5%; }
+#h-favs .ft-logo { height: 3.2rem; }
+#h-favs .ft-name { font-size: 1.05rem; margin-top: .25rem; }
+#h-favs .tile-now { font-size: .9rem; }
+#h-favs .tiles { padding-top: 0; }
