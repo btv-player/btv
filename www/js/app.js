@@ -3,7 +3,7 @@
   'use strict';
 
   // ---------------------------------------------------------------- Config
-  var APP_VERSION = '1.8.0'; // aumentala a ogni aggiornamento: in Impostazioni vedi quale versione sta girando
+  var APP_VERSION = '1.8.1'; // aumentala a ogni aggiornamento: in Impostazioni vedi quale versione sta girando
   var PRESETS = [];      // nessuna lista precaricata: solo quelle che aggiungi tu
   // Guide TV gratuite in formato XMLTV (si possono disattivare o aggiungerne altre nelle Impostazioni).
   var DEFAULT_EPG = [];  // nessuna guida precaricata: quella della playlist + quelle che aggiungi tu
@@ -43,6 +43,12 @@
 
   // ---------------------------------------------------------------- Stato
   var platform = detectPlatform();
+  // BTV funziona solo come app installata su TV e Fire TV: nessun accesso da browser o telefono
+  // (il browser resta solo per lo sviluppo, su questo PC).
+  if (platform === 'web' && !/^(localhost|127\.0\.0\.1)$/.test(location.hostname)) {
+    document.body.innerHTML = '<p style="color:#c9d3f5;font:20px sans-serif;text-align:center;margin-top:20vh">BTV è disponibile solo come app per Smart TV e Fire TV.</p>';
+    return;
+  }
   var state = {
     channels: [], groups: [], group: '__home', query: '', pv: { ch: null, hls: null, timer: null },
     filtered: [], rendered: 0,
@@ -56,7 +62,7 @@
     epgEnabled: Store.get('epgEnabled', true),
     epgSources: loadEpgSources(),
     playlistEpg: [], epgToken: 0, epgCount: 0, epgLoading: false,
-    guide: null, pair: null, update: null, updLast: 0, updCheck: Store.get('updCheck', true), multiSingle: Store.get('multiSingle', false),
+    guide: null, pair: null, watchTick: 0, update: null, updLast: 0, updCheck: Store.get('updCheck', true), multiSingle: Store.get('multiSingle', false),
     quality: Store.get('quality', 0), levels: [],
     multiPref: Store.get('multiPref', 0), multi: null, multiReturn: null, multiBrowseFocus: null, picker: null,
     resumeLast: Store.get('resumeLast', true), resumed: false, prevUrl: null,
@@ -408,20 +414,6 @@
     el.status.classList.remove('hidden');
   }
 
-  // Icona della categoria dal suo nome (le playlist non hanno icone: le deduciamo).
-  function catIcon(name) {
-    var n = String(name).toLowerCase();
-    if (/sport|calcio|dazn|eurosport|basket|volley|tennis|motor|f1|golf|nba|serie a/.test(n)) return 'trophy';
-    if (/cinema|film|movie|netflix|prime|disney|apple|vod|serie/.test(n)) return 'film';
-    if (/kid|bambin|cartoon|ragazzi|junior/.test(n)) return 'smile';
-    if (/music|musica|radio|mtv/.test(n)) return 'music';
-    if (/news|notizie|tg|informazione/.test(n)) return 'news';
-    if (/doc|natura|scienza|storia|discovery/.test(n)) return 'doc';
-    if (/chiaro|generalist|rai|mediaset|tv|intratten/.test(n)) return 'tv';
-    if (/world|mondo|international|estero/.test(n)) return 'globe';
-    return 'folder';
-  }
-
   function showHome() {
     el.grid.innerHTML = '';
     el.grid.classList.add('hidden');
@@ -451,9 +443,13 @@
       var lg = document.createElement('div'); lg.className = 'hg-logo'; fillLogo(lg, ch);
       var nm = document.createElement('span'); nm.className = 'hg-num'; nm.textContent = ch.num;
       c.appendChild(lg); c.appendChild(nm);
-      var t = document.createElement('div'); t.className = 'hg-time';
-      var p = document.createElement('div'); p.className = 'hg-title';
-      r.appendChild(c); r.appendChild(t); r.appendChild(p);
+      var pr = document.createElement('div'); pr.className = 'hg-prog';
+      var l1 = document.createElement('div'); l1.className = 'hg-l1';
+      var t = document.createElement('span'); t.className = 'hg-time';
+      var p = document.createElement('span'); p.className = 'hg-title';
+      var nx = document.createElement('div'); nx.className = 'hg-next';
+      l1.appendChild(t); l1.appendChild(p); pr.appendChild(l1); pr.appendChild(nx);
+      r.appendChild(c); r.appendChild(pr);
       fillGuideRow(r, ch, now);
       frag.appendChild(r);
     });
@@ -480,45 +476,57 @@
       ft.appendChild(d);
     });
 
-    // Categorie: le 8 più grandi
-    var ct = $('hc-tiles');
-    ct.innerHTML = '';
-    state.groups.slice().sort(function (x, y) { return y.count - x.count; }).slice(0, 8).forEach(function (g) {
-      var d = document.createElement('div');
-      d.className = 'ctile focusable';
-      d.setAttribute('data-action', 'homeGroup');
-      d.setAttribute('data-group', g.id);
-      d.innerHTML = Icons.svg(catIcon(g.name));
-      var nm = document.createElement('div'); nm.className = 'ct-name'; nm.textContent = g.name;
-      d.appendChild(nm);
-      ct.appendChild(d);
-    });
+    // Canale precedente e più visti
+    var qp = $('hq-prev');
+    qp.innerHTML = '';
+    var prev = channelByUrl(state.prevUrl || Store.get('prevChannel', ''));
+    if (prev) qp.appendChild(quickTile(prev, 'wide'));
+    else { var q0 = document.createElement('div'); q0.className = 'tiles-empty'; q0.textContent = 'Qui compare il canale guardato prima di quello attuale.'; qp.appendChild(q0); }
+    var qt = $('hq-top');
+    qt.innerHTML = '';
+    var top = mostWatched(3);
+    if (!top.length) { var q1 = document.createElement('div'); q1.className = 'tiles-empty'; q1.textContent = 'I canali che guardi di più.'; qt.appendChild(q1); }
+    top.forEach(function (ch) { qt.appendChild(quickTile(ch, '')); });
+  }
 
-    // Continua a guardare: l'ultimo canale visto
-    var kb = $('hk-body');
-    kb.innerHTML = '';
-    var last = channelByUrl(Store.get('lastChannel', ''));
-    if (!last) {
-      var k0 = document.createElement('div'); k0.className = 'tiles-empty'; k0.textContent = 'Qui trovi l\'ultimo canale che hai guardato.';
-      kb.appendChild(k0);
-    } else {
-      var card = document.createElement('div'); card.className = 'kcard';
-      var kl = document.createElement('div'); kl.className = 'k-logo'; fillLogo(kl, last);
-      var kn = document.createElement('div'); kn.className = 'k-name'; kn.textContent = last.title;
-      var nn = EPG.nowNext(last.epg, now);
-      var kp = document.createElement('div'); kp.className = 'k-now'; kp.textContent = nn.now ? nn.now[2] : (last.groups[0] || '');
-      var go = document.createElement('button'); go.className = 'btn primary focusable k-go';
-      go.setAttribute('data-action', 'homePlay'); go.setAttribute('data-url', last.url);
-      setIc(go, 'play', 'Guarda ora');
-      card.appendChild(kl); card.appendChild(kn); card.appendChild(kp); card.appendChild(go);
-      kb.appendChild(card);
+  function quickTile(ch, cls) {
+    var d = document.createElement('div');
+    d.className = 'qtile focusable ' + cls;
+    d.setAttribute('data-action', 'homePlay');
+    d.setAttribute('data-url', ch.url);
+    var lg = document.createElement('div'); lg.className = 'qt-logo'; fillLogo(lg, ch);
+    var tx = document.createElement('div'); tx.className = 'qt-text';
+    var nm = document.createElement('div'); nm.className = 'qt-name'; nm.textContent = ch.num + '  ' + ch.title;
+    var nn = EPG.nowNext(ch.epg, Date.now());
+    var nw = document.createElement('div'); nw.className = 'qt-now'; nw.textContent = nn.now ? nn.now[2] : '';
+    tx.appendChild(nm); tx.appendChild(nw);
+    d.appendChild(lg); d.appendChild(tx);
+    return d;
+  }
+
+  // Minuti di visione per canale: restano solo su questo dispositivo, al massimo 40 canali.
+  function addWatch(url, sec) {
+    var st = Store.get('watchStats', {});
+    st[url] = (st[url] || 0) + sec;
+    var keys = Object.keys(st);
+    if (keys.length > 40) {
+      keys.sort(function (x, y) { return st[y] - st[x]; });
+      keys.slice(40).forEach(function (k) { delete st[k]; });
     }
+    Store.set('watchStats', st);
+  }
+
+  function mostWatched(n) {
+    var st = Store.get('watchStats', {});
+    return Object.keys(st).sort(function (x, y) { return st[y] - st[x]; })
+      .map(channelByUrl).filter(function (c) { return !!c; }).slice(0, n);
   }
 
   function fillGuideRow(r, ch, now) {
     var nn = EPG.nowNext(ch.epg, now);
-    r.querySelector('.hg-time').textContent = nn.now ? hhmm(nn.now[0]) + ' – ' + hhmm(nn.now[1]) : '';
+    r.querySelector('.hg-time').textContent = nn.now ? hhmm(nn.now[0]) : '';
     r.querySelector('.hg-title').textContent = nn.now ? nn.now[2] : ch.title;
+    r.querySelector('.hg-next').textContent = nn.next ? 'Poi ' + hhmm(nn.next[0]) + '  ' + nn.next[2] : '';
     r.classList.toggle('playing', !!(state.pv.ch && state.pv.ch.url === ch.url));
   }
 
@@ -1060,7 +1068,18 @@
     hideOsd();
     if (state.guide) closeGuide();
     el.perr.classList.add('hidden');
-    show('browse', focusCardFor(state.playing) || state.returnFocus);
+    goHome(state.playing);
+  }
+
+  // Torna alla Home (dal lettore o dalla multivisione), con il canale appena visto nell'anteprima.
+  function goHome(ch) {
+    if (!activePlaylist()) { show('browse', el.search); return; }
+    if (ch) state.pv.ch = ch;
+    state.query = ''; el.search.value = '';
+    if (state.group !== '__home') selectGroup('__home');
+    show('browse', el.pvPanel);
+    if (el.home.classList.contains('hidden')) applyFilter();
+    else renderHome();
   }
 
   function focusCardFor(ch) {
@@ -1079,7 +1098,7 @@
     if (!n) return;
     i = ((i % n) + n) % n;
     state.playIdx = i;
-    if (state.playing && state.playing.url !== state.playList[i].url) state.prevUrl = state.playing.url;
+    if (state.playing && state.playing.url !== state.playList[i].url) { state.prevUrl = state.playing.url; Store.set('prevChannel', state.prevUrl); }
     state.playing = state.playList[i];
     state.stallRetries = 0;
     Store.set('lastChannel', state.playing.url);
@@ -1288,8 +1307,6 @@
   }
 
   function updateTrackButtons() {
-    var pipBtn = $('osd-pip');
-    if (pipBtn) pipBtn.classList.toggle('hidden', !(document.pictureInPictureEnabled && platform === 'web' && !el.video.disablePictureInPicture));
     var h = state.mode === 'hlsjs' ? state.hls : null;
     var a = h && h.audioTracks || [], s = h && h.subtitleTracks || [];
     el.osdAudio.classList.toggle('hidden', a.length < 2);
@@ -1426,7 +1443,7 @@
     updateQualityLabel();
     updateTrackButtons();
     el.osdPrev.classList.toggle('hidden', !state.prevUrl);
-    setIc(el.osd.querySelector('[data-action="closePlayer"]'), 'back', state.multiReturn ? 'Multivisione' : 'Canali');
+    setIc($('osd-home'), state.multiReturn ? 'multi' : 'home', state.multiReturn ? 'Multivisione' : 'Home');
     updateShift();
     el.osd.classList.remove('hidden');
     if (withFocus) Nav.setRoot(el.osd, Nav.current() && el.osd.contains(Nav.current()) ? Nav.current() : el.osdPause);
@@ -1451,6 +1468,11 @@
     el.osd.classList.add('hidden');
   }
 
+  function firstOsdButton() {
+    var b = el.osd.querySelectorAll('.osd-buttons .btn');
+    for (var i = 0; i < b.length; i++) if (!b[i].classList.contains('hidden')) return b[i];
+    return null;
+  }
   function osdVisible() { return !el.osd.classList.contains('hidden'); }
 
   function updateOsdFav() {
@@ -1748,7 +1770,7 @@
     m.tiles.forEach(function (t, i) { tileStop(i); });
     state.multi = null;
     el.multiGrid.innerHTML = '';
-    if (toBrowse !== false) show('browse', state.multiBrowseFocus);
+    if (toBrowse !== false) goHome(null);
   }
 
   function tileStop(i) {
@@ -2056,6 +2078,7 @@
         }
         return true;
       case 'enter':
+        if (cur && cur.classList.contains('mhome')) { closeMulti(); return true; }
         if (cur && cur.classList.contains('mlayout')) { setMultiLayout(+cur.getAttribute('data-n')); return true; }
         if (t.ch) tileMenu(true);
         else openPicker(function (ch) { tileLoad(m.focus, ch); });
@@ -2314,14 +2337,6 @@
       state.dead = {}; Store.set('dead', {}); applyFilter(); toast('Tutti i canali verranno riprovati');
     },
     toggleFavPlaying: function () { toggleFav(state.playing); showOsd(true); },
-    // Picture in picture: il video resta in un riquadro sopra le altre app (browser di telefono e PC).
-    pip: function () {
-      var v = el.video;
-      try {
-        if (document.pictureInPictureElement) document.exitPictureInPicture();
-        else if (v.requestPictureInPicture) v.requestPictureInPicture().catch(function () { toast('Picture in picture non disponibile qui'); });
-      } catch (e) { toast('Picture in picture non disponibile qui'); }
-    },
     seekBack: function () { seekBy(-SEEK_STEP); showOsd(true); },
     seekFwd: function () { seekBy(SEEK_STEP); showOsd(true); },
     togglePause: function () { togglePause(); showOsd(true); },
@@ -2470,14 +2485,22 @@
 
     if (state.screen === 'player') {
       switch (a) {
-        case 'up': case 'chup': playIndex(state.playIdx + 1); return true;
-        case 'down': case 'chdown': playIndex(state.playIdx - 1); return true;
+        case 'down':
+          if (osdVisible() && Nav.current() === $('osd-home')) { Nav.focus(firstOsdButton()); showOsd(true); return true; }
+          playIndex(state.playIdx - 1); return true;
+        case 'up':
+          if (osdVisible() && Nav.current() === $('osd-home')) { showOsd(true); return true; }
+          playIndex(state.playIdx + 1); return true;
+        case 'chup': playIndex(state.playIdx + 1); return true;
+        case 'chdown': playIndex(state.playIdx - 1); return true;
         case 'rw': seekBy(-SEEK_STEP); return true;
         case 'ff': seekBy(SEEK_STEP); return true;
         case 'left': case 'right':
           // Barra visibile: muovi tra i pulsanti. Barra nascosta: la apre sul pulsante ⏪/⏩
           // (prima tornava subito indietro di 30 s ed era facile farlo per sbaglio).
-          if (osdVisible() && Nav.current() && el.osd.contains(Nav.current())) { Nav.move(a); showOsd(true); }
+          if (osdVisible() && Nav.current() === $('osd-home')) { if (a === 'right') Nav.focus(firstOsdButton()); showOsd(true); }
+          else if (osdVisible() && a === 'left' && Nav.current() === firstOsdButton()) { Nav.focus($('osd-home')); showOsd(true); }
+          else if (osdVisible() && Nav.current() && el.osd.contains(Nav.current())) { Nav.move(a); showOsd(true); }
           else { showOsd(false); Nav.setRoot(el.osd, el.osd.querySelector(a === 'left' ? '[data-action="seekBack"]' : '[data-action="seekFwd"]')); showOsd(true); }
           return true;
         case 'live': goLive(); return true;
@@ -2558,6 +2581,7 @@
       return;
     }
     if (state.screen === 'multi' && state.multi && !state.guide) {
+      if (cl('.mhome')) { closeMulti(); return; }
       var lb = cl('.mlayout');
       if (lb) { setMultiLayout(+lb.getAttribute('data-n')); return; }
       var tile = cl('.tile');
@@ -2602,6 +2626,7 @@
   setInterval(refreshEpgViews, 60000);
   setInterval(function () { updateClock(); refreshHome(); }, 30000);                                    // "in onda" aggiornato ogni minuto
   setInterval(function () {
+    if (state.screen === 'player' && state.playing && !el.video.paused && ++state.watchTick >= 30) { state.watchTick = 0; addWatch(state.playing.url, 30); }
     if (state.screen === 'player') { if (osdVisible()) updateShift(); updateLiveBadge(); playerWatchdog(); }
     else el.liveBadge.classList.add('hidden');
     if (state.screen === 'multi' && state.multi) { updateTileLive(); if (!background) tileWatchdog(); }

@@ -475,3 +475,42 @@ html, body { background: #050816; }
 #osd { background: linear-gradient(0deg, rgba(3, 6, 20, .96) 0%, rgba(3, 6, 20, .8) 55%, rgba(3, 6, 20, 0) 100%); }
 .osd-num { color: #7fc4ff; }
 #toast { background: #1f6bff; background-image: linear-gradient(135deg, #1f8bff, #6a3dff); color: #fff; box-shadow: 0 0 2rem rgba(60, 120, 255, .6); }
+
+/* ===== Home v2: guida a tutta altezza, preferiti + canale precedente / più visti ===== */
+#home { flex-direction: row; }
+.h-left { flex: 63; display: flex; flex-direction: column; min-width: 0; margin-right: 1.2rem; }
+#h-preview { flex: 56; margin: 0 0 1.2rem; }
+.h-left .h-bottom { flex: 44; display: flex; min-height: 0; }
+#h-guide { flex: 37; }
+#h-favs { flex: 55; margin-right: 1.2rem; }
+#h-quick { flex: 45; }
+.ph-sub { padding-top: .4rem; }
+.hg-row { padding: .45rem .6rem; }
+.hg-ch { width: 7.6rem; }
+.hg-prog { flex: 1; min-width: 0; }
+.hg-l1 { display: flex; align-items: baseline; min-width: 0; }
+.hg-time { width: auto; flex: none; margin-right: .7rem; font-size: 1rem; font-weight: 700; color: #7fc4ff; }
+.hg-title { font-size: 1.15rem; }
+.hg-next { font-size: .95rem; color: #8c97bd; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: .1rem; }
+.hg-row.focused .hg-next { color: #e6ecff; }
+.qtile { display: flex; align-items: center; border-radius: 1rem; background: rgba(18, 28, 66, .85); border: .12rem solid rgba(80, 130, 255, .25);
+  cursor: pointer; overflow: hidden; padding: .5rem .8rem; }
+.qtile.wide { margin: 0 1rem .4rem; height: 5.6rem; }
+#hq-top .qtile { width: 32%; margin: 0 2% 0 0; flex-direction: column; justify-content: center; height: 7rem; padding: .4rem; text-align: center; }
+#hq-top .qtile:last-child { margin-right: 0; }
+.qt-logo { width: 5.4rem; height: 3.8rem; display: flex; align-items: center; justify-content: center; flex: none; }
+.qt-logo img { max-width: 100%; max-height: 100%; }
+.qtile.wide .qt-logo { margin-right: 1rem; }
+.qt-text { min-width: 0; }
+.qt-name { font-size: 1.05rem; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.qt-now { font-size: .95rem; color: #8c97bd; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#hq-top .qt-now { display: none; }
+#hq-top .qt-name { font-size: .9rem; font-weight: 600; max-width: 100%; }
+.qtile.focused { border-color: #8fd0ff; background: rgba(31, 107, 255, .35); transform: scale(1.05); box-shadow: 0 0 1.6rem rgba(60, 150, 255, .7); }
+.qtile.focused .qt-now { color: #e6ecff; }
+#h-favs .ftile { height: 6.6rem; }
+
+/* Home in alto a sinistra nel lettore e nella multivisione */
+.osd-home { position: fixed; top: 2.4rem; left: 3rem; font-size: 1.2rem; padding: .7rem 1.4rem; }
+#live-badge { left: auto; right: 3rem; }
+.mhome { margin-right: 1.2rem; }

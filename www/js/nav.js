@@ -10,7 +10,9 @@ var Nav = (function () {
   var custom = null;
 
   function visible(el) {
-    if (!el || el.offsetParent === null) return false;
+    if (!el) return false;
+    // offsetParent è null anche per gli elementi "fixed" (es. Home in alto nel lettore): per loro conta solo la dimensione
+    if (el.offsetParent === null && window.getComputedStyle(el).position !== 'fixed') return false;
     var r = el.getBoundingClientRect();
     return r.width > 0 && r.height > 0;
   }

@@ -33,7 +33,7 @@
 
       <!-- Home: anteprima, guida, preferiti, categorie, continua a guardare -->
       <div id="home" class="hidden">
-        <div class="h-top">
+        <div class="h-left">
           <div id="h-preview" class="panel focusable" data-action="previewFull">
             <video id="pv-video" muted playsinline></video>
             <div class="pv-empty">Scegli un canale dalla guida</div>
@@ -42,24 +42,22 @@
             <div class="pv-info"><div class="pv-logo"></div><div class="pv-text"><div class="pv-name"></div><div class="pv-now"></div></div></div>
             <div class="pv-bar"><i data-ic="play"></i><i data-ic="audio"></i><span class="pv-prog"><i></i></span><span class="pv-red">LIVE</span><span class="pv-hint">OK: schermo intero</span><i data-ic="fullscreen"></i></div>
           </div>
-          <div id="h-guide" class="panel">
-            <div class="ph"><i data-ic="guide"></i><span class="ph-t">Guida TV</span><span class="ph-date" id="hg-date"></span></div>
-            <div id="hg-list"></div>
+          <div class="h-bottom">
+            <div class="panel" id="h-favs">
+              <div class="ph"><i data-ic="starf"></i><span class="ph-t">I tuoi preferiti</span><button class="ph-more focusable" data-action="homeGroup" data-group="__fav">Vedi tutti<i data-ic="arrow"></i></button></div>
+              <div class="tiles" id="hf-tiles"></div>
+            </div>
+            <div class="panel" id="h-quick">
+              <div class="ph"><i data-ic="previous"></i><span class="ph-t">Canale precedente</span></div>
+              <div id="hq-prev"></div>
+              <div class="ph ph-sub"><i data-ic="trophy"></i><span class="ph-t">Più visti</span></div>
+              <div class="tiles" id="hq-top"></div>
+            </div>
           </div>
         </div>
-        <div class="h-bottom">
-          <div class="panel" id="h-favs">
-            <div class="ph"><i data-ic="starf"></i><span class="ph-t">I tuoi preferiti</span><button class="ph-more focusable" data-action="homeGroup" data-group="__fav">Vedi tutti<i data-ic="arrow"></i></button></div>
-            <div class="tiles" id="hf-tiles"></div>
-          </div>
-          <div class="panel" id="h-cats">
-            <div class="ph"><i data-ic="folder"></i><span class="ph-t">Categorie</span><button class="ph-more focusable" data-action="homeGroup" data-group="__all">Vedi tutte<i data-ic="arrow"></i></button></div>
-            <div class="tiles" id="hc-tiles"></div>
-          </div>
-          <div class="panel" id="h-cont">
-            <div class="ph"><i data-ic="play"></i><span class="ph-t">Continua a guardare</span></div>
-            <div id="hk-body"></div>
-          </div>
+        <div id="h-guide" class="panel">
+          <div class="ph"><i data-ic="guide"></i><span class="ph-t">Guida TV</span><span class="ph-date" id="hg-date"></span></div>
+          <div id="hg-list"></div>
         </div>
       </div>
 
@@ -81,6 +79,7 @@
     <div id="numjump" class="hidden"></div>
     <button id="live-badge" class="focusable hidden" data-action="goLive"></button>
     <div id="osd" class="hidden">
+      <button class="btn focusable osd-home" id="osd-home" data-action="closePlayer"><i data-ic="home"></i>Home</button>
       <div class="osd-info">
         <div class="osd-logo"></div>
         <div class="osd-text">
@@ -96,7 +95,6 @@
       </div>
       <div class="osd-shift" id="osd-shift"></div>
       <div class="osd-buttons">
-        <button class="btn focusable" data-action="closePlayer"><i data-ic="back"></i>Canali</button>
         <button class="btn focusable" data-action="seekBack" title="Indietro 30 secondi"><i data-ic="rewind"></i>30s</button>
         <button class="btn focusable" id="osd-pause" data-action="togglePause"><i data-ic="pause"></i></button>
         <button class="btn focusable" data-action="seekFwd" title="Avanti 30 secondi"><i data-ic="forward"></i>30s</button>
@@ -109,10 +107,9 @@
         <button class="btn focusable" id="osd-quality" data-action="cycleQuality"><i data-ic="quality"></i>Auto</button>
         <button class="btn focusable hidden" id="osd-audio" data-action="cycleAudio"><i data-ic="audio"></i>Audio</button>
         <button class="btn focusable hidden" id="osd-subs" data-action="cycleSubs"><i data-ic="subs"></i>No</button>
-        <button class="btn focusable hidden" id="osd-pip" data-action="pip" title="Riquadro sopra le altre app"><i data-ic="two"></i>PiP</button>
         <button class="btn focusable" id="osd-fav" data-action="toggleFavPlaying"><i data-ic="star"></i></button>
       </div>
-      <div class="osd-help">▲ ▼ cambia canale · ◀ ▶ indietro / avanti 30s · Menu: lista canali · Giallo: canale precedente · Indietro esci</div>
+      <div class="osd-help">▲ ▼ cambia canale · ◀ ▶ indietro / avanti 30s · Menu: lista canali · Giallo: canale precedente · Indietro: Home</div>
     </div>
   </section>
 
@@ -188,12 +185,13 @@
   <!-- ===== Multivisione ===== -->
   <section id="multi" class="screen">
     <div id="multi-bar">
+      <button class="btn focusable mhome"><i data-ic="home"></i>Home</button>
       <span class="mb-title"><i data-ic="multi"></i>Multivisione</span>
       <button class="btn focusable mlayout" data-n="2"><i data-ic="two"></i>2 riquadri</button>
       <button class="btn focusable mlayout" data-n="4"><i data-ic="multi"></i>4 riquadri</button>
     </div>
     <div id="multi-grid"></div>
-    <div id="multi-hint">◀ ▶ ▲ ▼ scegli riquadro (l'audio segue la selezione) · OK opzioni · CH+/CH− cambia canale · Indietro esci</div>
+    <div id="multi-hint">◀ ▶ ▲ ▼ scegli riquadro (l'audio segue la selezione) · OK opzioni · CH+/CH− cambia canale · Indietro: Home</div>
   </section>
 
   <!-- ===== Scelta del canale (multivisione) ===== -->
