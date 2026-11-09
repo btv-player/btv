@@ -12,7 +12,8 @@ Un unico codice web (`www/`) che gira su:
 
 ## Funzioni
 
-- Liste precaricate di canali **gratuiti e legali** dal progetto open source [iptv-org](https://github.com/iptv-org/iptv): Italia, Notizie, Musica, Bambini
+- **Nessun contenuto incluso**: l'app è vuota, aggiungi solo le tue playlist e le tue guide
+- **Accesso con utente e password** del tuo fornitore (formato Xtream Codes): canali e guida si caricano da soli
 - Aggiunta di **playlist M3U/M3U8 personali** tramite URL (anche più di una)
 - **Aggiungi dal telefono o dal PC**: la TV mostra un codice QR; sul telefono incolli l'indirizzo della playlist o
   della guida e lo invii. I dati viaggiano cifrati con il codice (cambia ogni volta) tramite ntfy.sh, che vede solo
@@ -20,7 +21,7 @@ Un unico codice web (`www/`) che gira su:
 - **Icone disegnate dall'app** (niente emoji): si vedono uguali su ogni TV
 - Categorie, **ricerca**, **preferiti**, numeri canale (digita il numero col telecomando)
 - **Guida TV (EPG)**: programma in onda e successivo su ogni canale, pannello con il palinsesto di oggi e domani
-  (fonti XMLTV gratuite: epgshare01, open-epg, Pluto TV; si possono aggiungere altre guide `.xml` / `.xml.gz`)
+  (quella indicata dalla playlist, più le guide `.xml` / `.xml.gz` che aggiungi tu)
 - **Scelta della qualità** (Auto / 1080p / 720p / …) quando il canale la offre; la scelta viene ricordata
 - **Pausa e "torna indietro"** sulla diretta (timeshift) con ⏪ 30s / ⏩ 30s / "Torna alla diretta"
 - **Multivisione**: fino a 4 canali insieme (2×2), audio dal riquadro selezionato, qualità ridotta automaticamente
@@ -246,9 +247,9 @@ assets/              icone e banner generati (npm run icons)
 
 ## Note legali
 
-BTV è **solo un lettore**: non ospita né distribuisce contenuti. Le liste predefinite di iptv-org
-raccolgono solo flussi resi pubblicamente disponibili dalle emittenti stesse. Alcuni canali possono essere
-offline, attivi solo in certi orari o bloccati fuori dal loro paese. Aggiungi solo playlist che hai il diritto di usare.
+BTV è **solo un lettore**: non contiene, non ospita e non distribuisce contenuti, playlist o abbonamenti.
+L'app parte vuota e ogni utente aggiunge sul proprio dispositivo solo ciò che ha il diritto di usare.
+Il sito pubblicato mostra solo una pagina di presentazione.
 
 ## Prossimi passi possibili
 

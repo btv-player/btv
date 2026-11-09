@@ -41,7 +41,7 @@
     <div class="mark">B</div>
     <div>
       <h1>Invia alla TV</h1>
-      <div class="sub">Aggiungi una playlist o una guida TV a BTV senza usare il telecomando</div>
+      <div class="sub">Accedi al tuo fornitore o aggiungi playlist e guide a BTV senza usare il telecomando</div>
     </div>
   </header>
 
@@ -52,13 +52,24 @@
 
   <div class="card">
     <div class="seg">
-      <button type="button" id="t-pl" class="on">Playlist M3U</button>
-      <button type="button" id="t-epg">Guida TV (EPG)</button>
+      <button type="button" id="t-xt" class="on">Accesso</button>
+      <button type="button" id="t-pl">Playlist</button>
+      <button type="button" id="t-epg">Guida TV</button>
     </div>
     <label for="name">Nome (facoltativo)</label>
     <input id="name" autocomplete="off" maxlength="60" placeholder="Es. La mia lista">
-    <label for="url" id="url-l">Indirizzo della playlist</label>
-    <input id="url" type="url" inputmode="url" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="https://…/lista.m3u">
+    <div id="box-xt">
+      <label for="server">Indirizzo del server del fornitore</label>
+      <input id="server" type="url" inputmode="url" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="http://server.fornitore.com:8080">
+      <label for="user">Nome utente</label>
+      <input id="user" autocomplete="off" autocapitalize="none" spellcheck="false">
+      <label for="pass">Password</label>
+      <input id="pass" type="password" autocomplete="off">
+    </div>
+    <div id="box-url">
+      <label for="url" id="url-l">Indirizzo della playlist</label>
+      <input id="url" type="url" inputmode="url" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="https://…/lista.m3u">
+    </div>
     <button class="go" id="send" type="button">Invia alla TV</button>
     <div class="msg" id="msg"></div>
   </div>

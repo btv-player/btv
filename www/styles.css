@@ -292,3 +292,16 @@ button, input { font: inherit; color: inherit; }
 .ts-logo .initials { font-size: 2.6rem; font-weight: 800; color: #6c7488; }
 .ts-hint { margin-top: 1rem; font-size: 1.1rem; color: #8f97ab; }
 .tile.focused .ts-hint { color: #fff; }
+
+/* Anteprima ferma (ultimo fotogramma) nei riquadri in attesa */
+.ts-shot { display: none; position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: contain; }
+.tile.has-shot .ts-shot { display: block; filter: brightness(.55); }
+.tile.has-shot .ts-logo { display: none; }
+.tile.has-shot .ts-hint { position: absolute; bottom: 1rem; left: 0; right: 0; text-align: center; color: #fff;
+  text-shadow: 0 0 .6rem #000; }
+
+/* ===== Benvenuto (nessuna playlist) ===== */
+.welcome { width: 100%; padding: 6rem 4rem; text-align: center; }
+.wl-title { font-size: 3rem; font-weight: 800; margin-bottom: 1rem; }
+.wl-sub { font-size: 1.4rem; color: #aab1c3; max-width: 60rem; margin: 0 auto 3rem; line-height: 1.5; }
+.wl-buttons .btn { margin: 0 .7rem; font-size: 1.4rem; padding: 1rem 1.8rem; }

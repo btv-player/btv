@@ -21,3 +21,4 @@ android/.idea/
 .claude/
 # Generati da "npm install" (tools/vendor.js) e da "cap sync"
 www/vendor/
+_site/

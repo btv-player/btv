@@ -17,7 +17,7 @@ if (arg === 'off') {
   delete cfg.server;
   console.log('Aggiornamenti automatici disattivati: l\'APK userà il codice incluso.');
 } else {
-  if (!/^https:\/\/[^\s]+\/$/.test(arg)) {
+  if (!/^https:\/\/[^\s]+(\/|\.html)$/.test(arg)) {
     console.error('Serve un indirizzo https che finisce con "/", es. https://tuonome.github.io/btv/');
     process.exit(1);
   }

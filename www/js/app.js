@@ -3,20 +3,10 @@
   'use strict';
 
   // ---------------------------------------------------------------- Config
-  var APP_VERSION = '1.6.1'; // aumentala a ogni aggiornamento: in Impostazioni vedi quale versione sta girando
-  var PRESETS = [
-    { id: 'it', name: 'Italia (canali gratuiti)', url: 'https://iptv-org.github.io/iptv/countries/it.m3u', preset: true },
-    { id: 'news', name: 'Notizie dal mondo', url: 'https://iptv-org.github.io/iptv/categories/news.m3u', preset: true },
-    { id: 'music', name: 'Musica', url: 'https://iptv-org.github.io/iptv/categories/music.m3u', preset: true },
-    { id: 'kids', name: 'Bambini', url: 'https://iptv-org.github.io/iptv/categories/kids.m3u', preset: true }
-  ];
+  var APP_VERSION = '1.7.0'; // aumentala a ogni aggiornamento: in Impostazioni vedi quale versione sta girando
+  var PRESETS = [];      // nessuna lista precaricata: solo quelle che aggiungi tu
   // Guide TV gratuite in formato XMLTV (si possono disattivare o aggiungerne altre nelle Impostazioni).
-  var DEFAULT_EPG = [
-    { id: 'es-it', name: 'Italia — epgshare01', url: 'https://epgshare01.online/epgshare01/epg_ripper_IT1.xml.gz', preset: true },
-    { id: 'oe-it2', name: 'Italia — open-epg (2)', url: 'https://www.open-epg.com/files/italy2.xml', preset: true },
-    { id: 'oe-it1', name: 'Italia — open-epg (1)', url: 'https://www.open-epg.com/files/italy1.xml', preset: true },
-    { id: 'pluto-it', name: 'Pluto TV Italia', url: 'https://i.mjh.nz/PlutoTV/it.xml', preset: true }
-  ];
+  var DEFAULT_EPG = [];  // nessuna guida precaricata: quella della playlist + quelle che aggiungi tu
   var EPG_MAX_AGE = 6 * 3600e3; // ogni quanto riscaricare la guida
   // TV e Fire TV hanno poca memoria: lì si usano valori più leggeri (sul PC restano quelli pieni).
   var LOW_POWER = detectPlatform() !== 'web';
@@ -55,7 +45,7 @@
     filtered: [], rendered: 0,
     favorites: Store.get('favorites', {}),
     playlists: loadPlaylists(),
-    activeId: Store.get('activePlaylist', 'it'),
+    activeId: Store.get('activePlaylist', ''),
     screen: 'browse',
     playList: [], playIdx: -1, playing: null,
     hls: null, mode: null, fallbackTried: false, netRetry: false, mediaRetry: false,
@@ -254,7 +244,7 @@
 
   function activePlaylist() {
     for (var i = 0; i < state.playlists.length; i++) if (state.playlists[i].id === state.activeId) return state.playlists[i];
-    return state.playlists[0];
+    return state.playlists[0] || null;
   }
 
   function b64ToBytes(b64) {
@@ -298,6 +288,8 @@
   function loadActive() {
     var pl = activePlaylist();
     var token = ++state.loadToken;
+    if (!pl) { showWelcome(); return; }
+    if (state.activeId !== pl.id) { state.activeId = pl.id; Store.set('activePlaylist', pl.id); }
     el.plName.textContent = pl.name;
     setStatus('Caricamento di “' + pl.name + '”…');
     state.channels = []; state.filtered = []; el.grid.innerHTML = '';
@@ -318,6 +310,54 @@
         setStatus('Impossibile caricare la playlist (' + (err && err.message ? err.message : 'errore di rete') + '). Controlla la connessione o l\'URL nelle Impostazioni.', true);
       }
     });
+  }
+
+  // Prima apertura (o nessuna playlist): tre modi per aggiungere la propria lista.
+  function showWelcome() {
+    state.channels = []; state.filtered = []; state.groups = [];
+    el.plName.textContent = '';
+    setStatus('');
+    renderGroups();
+    el.grid.innerHTML = '';
+    var w = document.createElement('div');
+    w.className = 'welcome';
+    w.innerHTML = '<div class="wl-title">Benvenuto in BTV</div>' +
+      '<div class="wl-sub">BTV è un lettore: non contiene canali. Aggiungi la tua playlist o accedi con le credenziali del tuo fornitore.</div>' +
+      '<div class="wl-buttons">' +
+      '<button class="btn focusable primary" data-action="openPair">' + Icons.svg('phone') + 'Dal telefono o dal PC</button>' +
+      '<button class="btn focusable" data-action="openLogin">' + Icons.svg('settings') + 'Accedi con utente e password</button>' +
+      '<button class="btn focusable" data-action="openSettings">' + Icons.svg('list') + 'Inserisci l\'indirizzo</button>' +
+      '</div>';
+    el.grid.appendChild(w);
+    if (state.screen === 'browse') Nav.setRoot(el.screens.browse, w.querySelector('.btn'));
+  }
+
+  // Login "Xtream Codes": server + utente + password del fornitore. Si ricavano playlist M3U e guida XMLTV.
+  function xtreamServer(u) {
+    u = String(u || '').trim().replace(/\/+$/, '');
+    if (/^[a-z][a-z0-9+.-]*:\/\//i.test(u) && !/^https?:/i.test(u)) return '';   // solo http/https
+    if (u && !/^https?:\/\//i.test(u)) u = 'http://' + u;
+    return /^https?:\/\/[a-z0-9.-]+(:\d{1,5})?(\/[^\s?#]*)?$/i.test(u) ? u : '';
+  }
+
+  function addXtream(server, user, pass, name) {
+    var srv = xtreamServer(server);
+    if (!srv || !user || !pass) { toast('Servono indirizzo del server, nome utente e password'); return null; }
+    var q = 'username=' + encodeURIComponent(user) + '&password=' + encodeURIComponent(pass);
+    var url = srv + '/get.php?' + q + '&type=m3u_plus&output=m3u8';
+    var p = addPlaylistUrl(name || ('Account ' + srv.replace(/^https?:\/\//, '')), url);
+    // la guida del fornitore (la playlist m3u_plus di solito la indica già: così è sicura)
+    addEpgUrl('Guida del fornitore', srv + '/xmltv.php?' + q);
+    // verifica delle credenziali: avvisa se il fornitore le rifiuta (la playlist resta, si può eliminare)
+    httpGet(srv + '/player_api.php?' + q).then(function (txt) {
+      var j = null; try { j = JSON.parse(txt); } catch (e) { /* risposta non JSON */ }
+      if (j && j.user_info && String(j.user_info.auth) === '0') toast('Il fornitore ha rifiutato nome utente o password', 6000);
+      else if (j && j.user_info && j.user_info.exp_date) {
+        var d = new Date(+j.user_info.exp_date * 1000);
+        if (!isNaN(d)) toast('Accesso riuscito · abbonamento valido fino al ' + d.toLocaleDateString('it-IT'), 5000);
+      }
+    }, function () { /* server non raggiungibile ora: lo dirà il caricamento della playlist */ });
+    return p;
   }
 
   function setChannels(list) {
@@ -418,7 +458,7 @@
     var urls = epgUrls();
     var token = ++state.epgToken;
     var pl = activePlaylist();
-    if (!urls.length) { state.epgLoading = false; clearEpg(); return; }
+    if (!urls.length || !pl) { state.epgLoading = false; clearEpg(); return; }
 
     var cache = Store.get('epg:' + pl.id, null);
     if (cache && cache.data && !force) attachGuides([cache.data]);
@@ -458,7 +498,7 @@
 
   function updateEpgLabel() {
     var pl = activePlaylist();
-    var txt = pl.name;
+    var txt = pl ? pl.name : '';
     if (state.epgLoading) txt += '  ·  caricamento guida…';
     else if (state.epgCount) txt += '  ·  guida per ' + state.epgCount + ' canali';
     el.plName.textContent = txt;
@@ -551,6 +591,7 @@
   }
 
   function applyFilter() {
+    if (!activePlaylist()) { showWelcome(); return; }   // nessuna playlist: resta il benvenuto
     var q = state.query.toLowerCase();
     var g = state.group;
     state.filtered = state.channels.filter(function (ch) {
@@ -1340,7 +1381,7 @@
         '<div class="tile-spin"><div class="ring"></div></div>' +
         '<div class="tile-err hidden"></div>' +
         '<div class="tile-label"><span class="tl-num"></span><span class="tl-name"></span><div class="tl-now"></div></div>' +
-        '<div class="tile-standby"><div class="ts-logo"></div><div class="ts-hint">' + Icons.svg('play') + 'Selezionalo per guardarlo</div></div>' +
+        '<div class="tile-standby"><canvas class="ts-shot"></canvas><div class="ts-logo"></div><div class="ts-hint">' + Icons.svg('play') + 'Selezionalo per guardarlo</div></div>' +
         '<div class="tile-audio">' + Icons.svg('audio') + '</div>' +
         '<button class="tile-live hidden">' + Icons.svg('live') + 'Diretta</button>' +
         '<div class="tile-menu hidden">' +
@@ -1370,7 +1411,7 @@
     }
     if (state.screen === 'browse') state.multiBrowseFocus = Nav.current();
     var f = focusIdx || 0;
-    state.multi = { tiles: buildTiles(n), focus: f, menu: -1, menuSel: 0 };
+    state.multi = { tiles: buildTiles(n), focus: f, menu: -1, menuSel: 0, shotTick: 0 };
     show('multi', state.multi.tiles[f].el);
     chans.forEach(function (c, j) { if (c) tileLoad(j, c); });
     updateTileAudio();
@@ -1431,11 +1472,34 @@
   // Riquadro in attesa (solo TV con un decoder): niente video, si vedono logo, nome e programma in onda.
   function tileStandby(i) {
     var t = state.multi.tiles[i];
+    tileSnapshot(t);
     tileStop(i);
     if (!t.ch) return;
     t.el.classList.add('standby');
+    t.el.classList.toggle('has-shot', t.shotUrl === t.ch.url);
     t.el.querySelector('.tile-err').classList.add('hidden');
     fillLogo(t.el.querySelector('.ts-logo'), t.ch);
+  }
+
+  // Anteprima: un fotogramma piccolo (320 px) del riquadro mentre va. Sulle TV che mostrano il video su un piano
+  // hardware separato il fotogramma può risultare nero: in quel caso non lo usiamo e resta il logo.
+  function tileSnapshot(t) {
+    var v = t.video;
+    if (!t.ch || !v.videoWidth || v.readyState < 2) return;
+    try {
+      var c = t.el.querySelector('.ts-shot');
+      var w = 320, h = Math.round(320 * v.videoHeight / v.videoWidth) || 180;
+      var tmp = t.shotTmp || (t.shotTmp = document.createElement('canvas'));
+      tmp.width = w; tmp.height = h;
+      var x = tmp.getContext('2d');
+      x.drawImage(v, 0, 0, w, h);
+      var d = x.getImageData(0, 0, w, h).data, lit = 0;
+      for (var p = 0; p < d.length; p += 4 * 97) if (d[p] + d[p + 1] + d[p + 2] > 60) lit++;
+      if (lit < 8) return;                          // nero: niente anteprima vera su questo dispositivo
+      c.width = w; c.height = h;
+      c.getContext('2d').drawImage(tmp, 0, 0);
+      t.shotUrl = t.ch.url;
+    } catch (e) { /* video di un altro dominio senza CORS: niente anteprima */ }
   }
 
   // Molte TV LG/Samsung danno alle app un solo decoder video: il secondo riquadro "ruba" il video al primo.
@@ -1525,6 +1589,9 @@
 
   // Come playerWatchdog, per ogni riquadro della multivisione.
   function tileWatchdog() {
+    if (state.multiSingle && ++state.multi.shotTick % 5 === 0) {
+      state.multi.tiles.forEach(function (t) { if (t.ch && !t.el.classList.contains('standby') && !t.video.paused) tileSnapshot(t); });
+    }
     if (!state.multiSingle && (platform === 'webos' || platform === 'tizen')) {
       var now = Date.now(), moving = 0, stuck = 0;
       state.multi.tiles.forEach(function (t) {
@@ -1815,13 +1882,18 @@
     if (!m || m.event !== 'message' || typeof m.message !== 'string') return;
     if (m.id) { if (p.seen[m.id]) return; p.seen[m.id] = 1; p.last = m.id; }
     var d = Pair.decrypt(p.keys, m.message);
-    if (!d || typeof d.url !== 'string' || d.url.length > 2000 || !/^https?:\/\/\S+$/i.test(d.url)) return; // non è per noi o è alterato
+    if (!d) return;                                                     // non è per noi o è stato alterato
+    if (d.t !== 'xt' && (typeof d.url !== 'string' || d.url.length > 2000 || !/^https?:\/\/\S+$/i.test(d.url))) return;
     var name = String(d.name || '').replace(/[\u0000-\u001f]/g, '').slice(0, 60);
     var line = document.createElement('div');
     line.className = 'pair-item';
     if (d.t === 'epg') {
       addEpgUrl(name, d.url);
       setIc(line, 'check', 'Guida TV aggiunta: ' + (name || maskUrl(d.url)));
+    } else if (d.t === 'xt') {
+      var xp = typeof d.user === 'string' && typeof d.pass === 'string' ? addXtream(d.server, d.user.slice(0, 200), d.pass.slice(0, 200), name) : null;
+      if (!xp) return;
+      setIc(line, 'check', 'Account aggiunto e attivato: ' + xp.name);
     } else if (d.t === 'pl') {
       var pl = addPlaylistUrl(name, d.url);
       setIc(line, 'check', 'Playlist aggiunta e attivata: ' + pl.name);
@@ -1963,12 +2035,20 @@
       saveCustomPlaylists();
       Store.remove('cache:' + id);
       Store.remove('epg:' + id);
-      if (state.activeId === id) { state.activeId = PRESETS[0].id; Store.set('activePlaylist', state.activeId); loadActive(); }
+      if (state.activeId === id) { state.activeId = state.playlists.length ? state.playlists[0].id : ''; Store.set('activePlaylist', state.activeId); loadActive(); }
       renderPlaylists();
       Nav.setRoot(el.screens.settings, null);
       toast('Playlist eliminata');
     },
     openPair: function () { openPair(); },
+    openLogin: function () { openSettings(); Nav.setRoot(el.screens.settings, $('xt-server')); $('xt-server').scrollIntoView(); },
+    addXtream: function () {
+      var p = addXtream($('xt-server').value, $('xt-user').value.trim(), $('xt-pass').value, '');
+      if (!p) return;
+      $('xt-pass').value = '';
+      Nav.setRoot(el.screens.settings, el.plList.querySelector('.pl-row.current .btn'));
+      toast('Account aggiunto e attivato: carico i canali…');
+    },
     closePair: function () { closePair(); },
     addPlaylist: function () {
       var url = el.plUrlIn.value.trim();

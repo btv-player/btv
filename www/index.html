@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>BTV</title>
+  <meta name="robots" content="noindex, nofollow">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -86,6 +87,16 @@
       </div>
       <div id="pl-list"></div>
 
+      <h2>Accedi con utente e password (Xtream Codes)</h2>
+      <div class="form-row">
+        <input id="xt-server" class="focusable wide" type="url" placeholder="Indirizzo del server (es. http://server.fornitore.com:8080)" autocomplete="off" spellcheck="false">
+      </div>
+      <div class="form-row">
+        <input id="xt-user" class="focusable" type="text" placeholder="Nome utente" autocomplete="off" spellcheck="false">
+        <input id="xt-pass" class="focusable" type="password" placeholder="Password" autocomplete="off">
+        <button class="btn focusable primary" data-action="addXtream">Accedi</button>
+      </div>
+
       <h2>Aggiungi una playlist M3U</h2>
       <div class="form-row">
         <input id="pl-name" class="focusable" type="text" placeholder="Nome (es. La mia lista)" autocomplete="off" spellcheck="false">
@@ -125,10 +136,8 @@
       </div>
 
       <p class="note">
-        BTV è solo un lettore: non fornisce né ospita alcun contenuto.
-        Le liste predefinite provengono dal progetto open-source <b>iptv-org</b>
-        e contengono solo canali trasmessi liberamente dalle emittenti.
-        Aggiungi solo playlist che hai il diritto di usare.
+        BTV è solo un lettore: non fornisce, non ospita e non consiglia alcun contenuto.
+        Usa solo playlist e abbonamenti che hai il diritto di usare.
       </p>
       <p class="note" id="app-version"></p>
     </div>

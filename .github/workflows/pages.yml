@@ -28,9 +28,15 @@ jobs:
         with:
           node-version: 22
       - run: npm ci            # il postinstall copia hls.js e pako in www/vendor
+      # Sito: all'indirizzo principale una pagina di presentazione; il lettore sta in player.html (usato dalle app).
+      - name: Prepara il sito
+        run: |
+          cp -r www _site
+          mv _site/index.html _site/player.html
+          cp site/index.html _site/index.html
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: www
+          path: _site
       - id: deployment
         uses: actions/deploy-pages@v4

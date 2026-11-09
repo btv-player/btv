@@ -12,7 +12,7 @@
     }
   },
   "server": {
-    "url": "https://btv-player.github.io/btv/",
+    "url": "https://btv-player.github.io/btv/player.html",
     "errorPath": "offline.html",
     "allowNavigation": [
       "btv-player.github.io"
