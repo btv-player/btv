@@ -3,7 +3,7 @@
   'use strict';
 
   // ---------------------------------------------------------------- Config
-  var APP_VERSION = '1.8.1'; // aumentala a ogni aggiornamento: in Impostazioni vedi quale versione sta girando
+  var APP_VERSION = '1.8.2'; // aumentala a ogni aggiornamento: in Impostazioni vedi quale versione sta girando
   var PRESETS = [];      // nessuna lista precaricata: solo quelle che aggiungi tu
   // Guide TV gratuite in formato XMLTV (si possono disattivare o aggiungerne altre nelle Impostazioni).
   var DEFAULT_EPG = [];  // nessuna guida precaricata: quella della playlist + quelle che aggiungi tu
@@ -472,7 +472,8 @@
       d.setAttribute('data-url', ch.url);
       var lg = document.createElement('div'); lg.className = 'ft-logo'; fillLogo(lg, ch);
       var nm = document.createElement('div'); nm.className = 'ft-name'; nm.textContent = ch.title;
-      d.appendChild(lg); d.appendChild(nm);
+      var nw = document.createElement('div'); nw.className = 'tile-now';
+      d.appendChild(lg); d.appendChild(nm); d.appendChild(nw);
       ft.appendChild(d);
     });
 
@@ -487,6 +488,7 @@
     var top = mostWatched(3);
     if (!top.length) { var q1 = document.createElement('div'); q1.className = 'tiles-empty'; q1.textContent = 'I canali che guardi di più.'; qt.appendChild(q1); }
     top.forEach(function (ch) { qt.appendChild(quickTile(ch, '')); });
+    refreshHome();                                                        // programmi in onda nei riquadri
   }
 
   function quickTile(ch, cls) {
@@ -497,8 +499,7 @@
     var lg = document.createElement('div'); lg.className = 'qt-logo'; fillLogo(lg, ch);
     var tx = document.createElement('div'); tx.className = 'qt-text';
     var nm = document.createElement('div'); nm.className = 'qt-name'; nm.textContent = ch.num + '  ' + ch.title;
-    var nn = EPG.nowNext(ch.epg, Date.now());
-    var nw = document.createElement('div'); nw.className = 'qt-now'; nw.textContent = nn.now ? nn.now[2] : '';
+    var nw = document.createElement('div'); nw.className = 'qt-now tile-now';
     tx.appendChild(nm); tx.appendChild(nw);
     d.appendChild(lg); d.appendChild(tx);
     return d;
@@ -530,12 +531,19 @@
     r.classList.toggle('playing', !!(state.pv.ch && state.pv.ch.url === ch.url));
   }
 
+  // Aggiorna i programmi in onda nella Home: ogni 30 secondi e appena arriva (o cambia) la guida TV.
   function refreshHome() {
     if (el.home.classList.contains('hidden')) return;
     var now = Date.now();
     Array.prototype.forEach.call(el.hgList.children, function (r) {
       var ch = channelByUrl(r.getAttribute('data-url'));
       if (ch) fillGuideRow(r, ch, now);
+    });
+    Array.prototype.forEach.call(el.home.querySelectorAll('.tile-now'), function (n) {
+      var t = n.parentNode.getAttribute('data-url') ? n.parentNode : n.parentNode.parentNode;   // .qt-now sta dentro .qt-text
+      var ch = channelByUrl(t.getAttribute('data-url'));
+      var nn = ch ? EPG.nowNext(ch.epg, now) : {};
+      n.textContent = nn.now ? nn.now[2] : '';
     });
     fillPreviewInfo();
   }
@@ -826,6 +834,7 @@
     if (state.screen === 'player' && osdVisible()) fillOsdEpg();
     if (state.guide) renderGuide(false);
     if (state.multi) state.multi.tiles.forEach(function (t) { if (t.ch) fillTileEpg(t); });
+    refreshHome();
     updateEpgLabel();
   }
 

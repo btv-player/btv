@@ -504,7 +504,7 @@ html, body { background: #050816; }
 .qt-text { min-width: 0; }
 .qt-name { font-size: 1.05rem; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .qt-now { font-size: .95rem; color: #8c97bd; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-#hq-top .qt-now { display: none; }
+#hq-top .qt-now { display: block; font-size: .8rem; max-width: 100%; }
 #hq-top .qt-name { font-size: .9rem; font-weight: 600; max-width: 100%; }
 .qtile.focused { border-color: #8fd0ff; background: rgba(31, 107, 255, .35); transform: scale(1.05); box-shadow: 0 0 1.6rem rgba(60, 150, 255, .7); }
 .qtile.focused .qt-now { color: #e6ecff; }
@@ -514,3 +514,10 @@ html, body { background: #050816; }
 .osd-home { position: fixed; top: 2.4rem; left: 3rem; font-size: 1.2rem; padding: .7rem 1.4rem; }
 #live-badge { left: auto; right: 3rem; }
 .mhome { margin-right: 1.2rem; }
+
+/* programma in onda, in piccolo, sotto il nome nei riquadri della Home */
+.tile-now { font-size: .8rem; color: #8c97bd; max-width: 92%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: .15rem; min-height: 1rem; }
+.ftile.focused .tile-now, .qtile.focused .tile-now { color: #e6ecff; }
+#h-favs .ftile { height: 7.4rem; }
+#h-favs .ft-logo { height: 3.8rem; }
+#hq-top .qtile { height: 7.6rem; }
