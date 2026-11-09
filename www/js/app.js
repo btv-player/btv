@@ -3,7 +3,7 @@
   'use strict';
 
   // ---------------------------------------------------------------- Config
-  var APP_VERSION = '1.8.4'; // aumentala a ogni aggiornamento: in Impostazioni vedi quale versione sta girando
+  var APP_VERSION = '1.8.5'; // aumentala a ogni aggiornamento: in Impostazioni vedi quale versione sta girando
   var PRESETS = [];      // nessuna lista precaricata: solo quelle che aggiungi tu
   // Guide TV gratuite in formato XMLTV (si possono disattivare o aggiungerne altre nelle Impostazioni).
   var DEFAULT_EPG = [];  // nessuna guida precaricata: quella della playlist + quelle che aggiungi tu
@@ -62,7 +62,7 @@
     epgEnabled: Store.get('epgEnabled', true),
     epgSources: loadEpgSources(),
     playlistEpg: [], epgToken: 0, epgCount: 0, epgLoading: false,
-    guide: null, pair: null, watchTick: 0, update: null, updLast: 0, updCheck: Store.get('updCheck', true), multiSingle: Store.get('multiSingle', false),
+    guide: null, pair: null, watchTick: 0, favOrder: Store.get('favOrder', []), reorder: null, update: null, updLast: 0, updCheck: Store.get('updCheck', true), multiSingle: Store.get('multiSingle', false),
     quality: Store.get('quality', 0), levels: [],
     multiPref: Store.get('multiPref', 0), multi: null, multiReturn: null, multiBrowseFocus: null, picker: null,
     resumeLast: Store.get('resumeLast', true), resumed: false, prevUrl: null,
@@ -422,7 +422,7 @@
     renderHome();
     if (!state.pv.ch) {
       var last = channelByUrl(Store.get('lastChannel', ''));
-      var favs = state.channels.filter(function (c) { return state.favorites[c.url]; });
+      var favs = favChannels();
       state.pv.ch = last || favs[0] || state.channels[0] || null;
     }
     if (state.pv.ch && state.screen === 'browse') previewPlay(state.pv.ch);
@@ -431,8 +431,9 @@
   function renderHome() {
     var now = Date.now();
     // Guida: i canali nell'ordine della playlist (preferiti prima), con il programma in onda
-    var favs = state.channels.filter(function (c) { return state.favorites[c.url]; });
-    var list = favs.concat(state.channels.filter(function (c) { return !state.favorites[c.url]; })).slice(0, 120);
+    var favs = favChannels();
+    // Guida: tutti i canali in ordine di numero, dall'1 in poi
+    var list = state.channels.slice().sort(function (a, b) { return a.num - b.num; }).slice(0, 400);
     var frag = document.createDocumentFragment();
     list.forEach(function (ch) {
       var r = document.createElement('div');
@@ -606,7 +607,7 @@
     if (pv.playingUrl === ch.url) return;
     previewStop();
     pv.ch = ch;
-    if (blockedLan(ch.url)) return;
+    if (!/^https?:\/\//i.test(ch.url) || blockedLan(ch.url)) return;
     pv.playingUrl = ch.url;
     clearTimeout(pv.watchTimer);
     pv.watchTimer = setTimeout(function () {                              // 10 secondi in anteprima = "guardato"
@@ -744,8 +745,14 @@
         try { resolve(onMain()); } catch (x) { reject(x); }
         return;
       }
-      epgWorker.onmessage = function (e) { if (e.data.ok) resolve(e.data.guide); else reject(new Error(e.data.error)); };
+      var guard = setTimeout(function () {
+        try { epgWorker.terminate(); } catch (x) { /* ignora */ }
+        epgWorker = null;
+        reject(new Error('guida troppo lenta da analizzare'));
+      }, 90000);
+      epgWorker.onmessage = function (e) { clearTimeout(guard); if (e.data.ok) resolve(e.data.guide); else reject(new Error(e.data.error)); };
       epgWorker.onerror = function (e) {
+        clearTimeout(guard);
         if (e && e.preventDefault) e.preventDefault();
         epgWorkerBroken = true; epgWorker = null;
         try { resolve(onMain()); } catch (x) { reject(x); }
@@ -866,10 +873,78 @@
   }
 
   // ---------------------------------------------------------------- Elenco
+  // Preferiti nell'ordine scelto dall'utente (Preferiti → Riordina); i nuovi vanno in fondo.
+  function favChannels() {
+    var pos = {};
+    state.favOrder.forEach(function (u, i) { pos[u] = i; });
+    return state.channels.filter(function (c) { return state.favorites[c.url]; })
+      .map(function (c, i) { return { c: c, k: pos.hasOwnProperty(c.url) ? pos[c.url] : 1e6 + i }; })
+      .sort(function (a, b) { return a.k - b.k; })
+      .map(function (x) { return x.c; });
+  }
+
+  function saveFavOrder(urls) {
+    state.favOrder = urls.slice(0, 2000);
+    Store.set('favOrder', state.favOrder);
+  }
+
   function favCount() {
     var n = 0;
     state.channels.forEach(function (ch) { if (state.favorites[ch.url]) n++; });
     return n;
+  }
+
+  // ---------------------------------------------------------------- Riordino dei preferiti
+  function startReorder() {
+    state.reorder = { moving: -1 };
+    el.grid.classList.add('reordering');
+    setIc($('btn-reorder'), 'check', 'Fine riordino');
+    $('reorder-hint').textContent = 'OK prende un canale · frecce lo spostano · OK lo lascia · Indietro per finire';
+    if (el.grid.children[0]) Nav.focus(el.grid.children[0]);
+  }
+
+  function stopReorder() {
+    state.reorder = null;
+    el.grid.classList.remove('reordering');
+    Array.prototype.forEach.call(el.grid.querySelectorAll('.moving'), function (c) { c.classList.remove('moving'); });
+    setIc($('btn-reorder'), 'swap', 'Riordina preferiti');
+    $('reorder-hint').textContent = '';
+    if (!el.home.classList.contains('hidden')) renderHome();
+  }
+
+  function moveFav(from, to) {
+    var list = state.filtered;
+    if (to < 0 || to >= list.length || to === from) return from;
+    var item = list.splice(from, 1)[0];
+    list.splice(to, 0, item);
+    // i preferiti nascosti (es. canali non funzionanti) restano in fondo
+    var shown = list.map(function (c) { return c.url; });
+    saveFavOrder(shown.concat(favChannels().map(function (c) { return c.url; }).filter(function (u) { return shown.indexOf(u) < 0; })));
+    el.grid.innerHTML = '';
+    state.rendered = 0;
+    while (state.rendered <= to && state.rendered < list.length) renderMore();
+    var card = el.grid.children[to];
+    card.classList.add('moving');
+    Nav.focus(card);
+    return to;
+  }
+
+  function reorderKey(a) {
+    var r = state.reorder, cur = Nav.current();
+    if (a === 'back') { stopReorder(); Nav.focus($('btn-reorder')); return true; }
+    if (!cur || !cur.classList.contains('card')) return false;
+    var i = +cur.getAttribute('data-idx');
+    if (a === 'enter') {
+      if (r.moving < 0) { r.moving = i; cur.classList.add('moving'); }
+      else { r.moving = -1; cur.classList.remove('moving'); toast('Posizione salvata'); }
+      return true;
+    }
+    if (r.moving < 0) return false;                                       // nessun canale preso: frecce normali
+    var cols = gridCols();
+    var to = a === 'left' ? i - 1 : a === 'right' ? i + 1 : a === 'up' ? i - cols : a === 'down' ? i + cols : -1;
+    if (to < 0) return a === 'left' || a === 'right' || a === 'up' || a === 'down';
+    r.moving = moveFav(i, Math.min(to, state.filtered.length - 1));
+    return true;
   }
 
   // Barra laterale: Home, Preferiti e Tutti i canali in grassetto con icona; poi le categorie della playlist, solo col nome.
@@ -898,6 +973,7 @@
 
   function selectGroup(id) {
     if (state.group === id) return;
+    if (state.reorder) stopReorder();
     state.group = id;
     Array.prototype.forEach.call(el.groups.children, function (g) {
       g.classList.toggle('active', g.getAttribute('data-group') === id);
@@ -911,9 +987,8 @@
     hideHome();
     var q = state.query.toLowerCase();
     var g = state.group;
-    state.filtered = state.channels.filter(function (ch) {
-      if (g === '__fav') { if (!state.favorites[ch.url]) return false; }
-      else if (g !== '__all' && ch.groups.indexOf(g) < 0) return false;
+    state.filtered = (g === '__fav' ? favChannels() : state.channels).filter(function (ch) {
+      if (g !== '__fav' && g !== '__all' && ch.groups.indexOf(g) < 0) return false;
       if (state.hideDead && state.dead[ch.url]) return false;
       return !q || ch.name.toLowerCase().indexOf(q) >= 0;
     });
@@ -921,6 +996,9 @@
     el.grid.scrollTop = 0;
     state.rendered = 0;
     renderMore();
+    var canReorder = g === '__fav' && !q && state.filtered.length > 1;
+    $('grid-tools').classList.toggle('hidden', !canReorder);
+    if (!canReorder && state.reorder) stopReorder();
     if (!state.channels.length) return;
     if (!state.filtered.length) {
       setStatus(g === '__fav' && !q ? 'Nessun preferito: premi Menu o il tasto Rosso su un canale per aggiungerlo.' : 'Nessun canale trovato.');
@@ -977,7 +1055,7 @@
           if (Math.floor((cards.length - 1) / cols) > Math.floor(i / cols)) return cards[cards.length - 1];
           return false;
         }
-        if (dir === 'up') return i - cols >= 0 ? cards[i - cols] : el.search;
+        if (dir === 'up') return i - cols >= 0 ? cards[i - cols] : ($('grid-tools').classList.contains('hidden') ? el.search : $('btn-reorder'));
       }
       if (from.classList.contains('group')) {
         if (dir === 'right') {
@@ -1018,8 +1096,13 @@
 
   function toggleFav(ch) {
     if (!ch) return;
-    if (state.favorites[ch.url]) delete state.favorites[ch.url];
-    else state.favorites[ch.url] = true;
+    if (state.favorites[ch.url]) {
+      delete state.favorites[ch.url];
+      saveFavOrder(state.favOrder.filter(function (u) { return u !== ch.url; }));
+    } else {
+      state.favorites[ch.url] = true;
+      saveFavOrder(state.favOrder.filter(function (u) { return u !== ch.url; }).concat([ch.url]));
+    }
     var saved = Store.set('favorites', state.favorites);
     var isFav = !!state.favorites[ch.url];
     if (!saved) toast('Memoria piena: preferiti non salvati. Elimina una playlist che non usi.', 5000);
@@ -1143,6 +1226,11 @@
   function startStream(ch) {
     stopStream();
     el.perr.classList.add('hidden');
+    if (!/^https?:\/\//i.test(ch.url)) {
+      el.perr.querySelector('.perr-msg').textContent = 'Indirizzo del canale non supportato (sono ammessi solo http e https).';
+      el.perr.classList.remove('hidden');
+      return;
+    }
     if (blockedLan(ch.url)) {
       el.perr.querySelector('.perr-msg').textContent = 'Questo canale punta a un dispositivo della tua rete di casa: bloccato per sicurezza.';
       el.perr.classList.remove('hidden');
@@ -1925,6 +2013,7 @@
       t.video.addEventListener('playing', function () { clearTimeout(t.timer); t.el.classList.remove('loading'); t.played = true; });
       t.video.addEventListener('error', function () { if (t.mode === 'native' && t.video.getAttribute('src')) tileFail(+t.el.getAttribute('data-i'), 'Formato non supportato o canale offline'); });
     }
+    if (!/^https?:\/\//i.test(ch.url)) { tileFail(i, 'Indirizzo non supportato'); return; }
     if (blockedLan(ch.url)) { tileFail(i, 'Bloccato: punta alla rete di casa'); return; }
     if (/\.m3u8?(\?|$)|\/hls\/|m3u8/i.test(ch.url) && hlsJsSupported()) tileHls(i, ch.url);
     else tileNative(i, ch.url);
@@ -2162,7 +2251,8 @@
   function openPair() {
     if (!window.Pair || !window.qrcode) { toast('Funzione non disponibile su questo dispositivo'); return; }
     closePair();
-    var code = Pair.newCode();
+    var code;
+    try { code = Pair.newCode(); } catch (e) { toast('Funzione non disponibile su questo dispositivo'); return; }
     var p = state.pair = { code: code, keys: null, since: Math.floor(Date.now() / 1000) - 10, last: '', seen: {}, es: null, timer: null };
     el.pair.querySelector('.pair-code').textContent = Pair.formatCode(code);
     el.pair.querySelector('.pair-url').textContent = SEND_URL.replace(/^https:\/\//, '').replace(/\/$/, '');
@@ -2258,7 +2348,7 @@
   }
 
   function openPicker(onPick, fixedList, selIdx, title) {
-    var favs = fixedList ? [] : state.channels.filter(function (c) { return state.favorites[c.url]; });
+    var favs = fixedList ? [] : favChannels();
     var rest = fixedList || state.channels.filter(function (c) { return !state.favorites[c.url]; });
     var list = favs.concat(rest).slice(0, 3000);
     state.picker = { list: list, sel: 0, onPick: onPick, favCount: favs.length };
@@ -2396,6 +2486,7 @@
       toast('Playlist eliminata');
     },
     openPair: function () { openPair(); },
+    toggleReorder: function () { if (state.reorder) stopReorder(); else startReorder(); },
     previewFull: function () {
       var ch = state.pv.ch;
       if (!ch) return;
@@ -2509,7 +2600,8 @@
   function handleAction(a) {
     if (!a) return false;
     if (state.pair) { if (a === 'back' || a === 'enter') closePair(); return true; }
-    if (state.picker && a.indexOf('digit') !== 0) return pickerAction(a); // i numeri restano "vai al canale N"
+    if (state.picker && a.indexOf('digit') !== 0) return pickerAction(a);
+    if (state.reorder && state.screen === 'browse' && reorderKey(a)) return true; // i numeri restano "vai al canale N"
     if (state.guide) { if (guideAction(a)) return true; }
     if (state.screen === 'multi' && a.indexOf('digit') !== 0) return multiAction(a);
     if (a === 'back') { handleBack(); return true; }

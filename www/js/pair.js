@@ -113,7 +113,7 @@ var Pair = (function () {
       var a = new Uint8Array(n); c.getRandomValues(a);
       for (i = 0; i < n; i++) out.push(a[i]);
     } else {
-      for (i = 0; i < n; i++) out.push(Math.floor(Math.random() * 256)); // TV molto vecchie: ripiego
+      throw new Error('generatore casuale sicuro non disponibile');   // niente codici prevedibili
     }
     return out;
   }

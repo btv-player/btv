@@ -79,31 +79,45 @@ var EPG = (function () {
     now = now || Date.now();
     var from = now - PAST, to = now + FUTURE;
     var channels = {}, progs = {};
-    var m;
 
-    var reCh = /<channel\b([^>]*)>([\s\S]*?)<\/channel>/g;
-    while ((m = reCh.exec(xml))) {
-      var id = attr(m[1], 'id');
-      if (!id) continue;
+    // Scansione lineare con indexOf: anche un file malformato (tag non chiusi) non può bloccare l'analisi.
+    function each(tagName, fn) {
+      var open = '<' + tagName, close = '</' + tagName + '>', pos = 0;
+      while (true) {
+        var a = xml.indexOf(open, pos);
+        if (a < 0) return;
+        var c = xml.charAt(a + open.length);
+        if (c !== ' ' && c !== '>' && c !== '\t' && c !== '\n' && c !== '\r') { pos = a + open.length; continue; }
+        var h = xml.indexOf('>', a);
+        if (h < 0) return;
+        var z = xml.indexOf(close, h);
+        if (z < 0) return;                                  // niente chiusura: il resto del file non è valido
+        fn(xml.slice(a + open.length, h), xml.slice(h + 1, z));
+        pos = z + close.length;
+      }
+    }
+
+    each('channel', function (head, body) {
+      var id = attr(head, 'id');
+      if (!id) return;
       var names = [];
-      var reName = /<display-name\b[^>]*>([\s\S]*?)<\/display-name>/g, n;
-      while ((n = reName.exec(m[2]))) names.push(decode(stripCdata(n[1])));
-      var icon = /<icon\b[^>]*src="([^"]*)"/.exec(m[2]);
+      var reName = /<display-name\b[^>]*>([^<]*(?:<(?!\/display-name>)[^<]*)*)<\/display-name>/g, n;
+      while ((n = reName.exec(body))) names.push(decode(stripCdata(n[1])));
+      var icon = /<icon\b[^>]*src="([^"]*)"/.exec(body);
       channels[id] = { names: names, icon: icon ? decode(icon[1]) : '' };
-    }
+    });
 
-    var reP = /<programme\b([^>]*)>([\s\S]*?)<\/programme>/g;
-    while ((m = reP.exec(xml))) {
-      var start = parseTime(attr(m[1], 'start'));
-      var stop = parseTime(attr(m[1], 'stop'));
-      if (isNaN(start)) continue;
+    each('programme', function (head, body) {
+      var start = parseTime(attr(head, 'start'));
+      var stop = parseTime(attr(head, 'stop'));
+      if (isNaN(start)) return;
       if (isNaN(stop)) stop = start + 3600e3;
-      if (stop < from || start > to) continue;
-      var ch = attr(m[1], 'channel');
-      var desc = tag(m[2], 'desc');
+      if (stop < from || start > to) return;
+      var ch = attr(head, 'channel');
+      var desc = tag(body, 'desc');
       if (desc.length > 280) desc = desc.slice(0, 277) + '…';
-      (progs[ch] || (progs[ch] = [])).push([start, stop, tag(m[2], 'title') || 'Senza titolo', desc, tag(m[2], 'category')]);
-    }
+      (progs[ch] || (progs[ch] = [])).push([start, stop, tag(body, 'title') || 'Senza titolo', desc, tag(body, 'category')]);
+    });
     Object.keys(progs).forEach(function (id) {
       if (!channels[id]) channels[id] = { names: [id], icon: '' };
       progs[id].sort(function (a, b) { return a[0] - b[0]; });

@@ -167,6 +167,8 @@ powershell -ExecutionPolicy Bypass -File .\tools\publish-release.ps1
 
 ## Installare BTV su altre Fire TV
 
+Guida completa per Fire TV, Android TV, LG, Samsung e altre TV: [docs/INSTALLAZIONE.md](docs/INSTALLAZIONE.md).
+
 Sulla Fire TV: app **Downloader** (store Amazon) → *Opzioni sviluppatore → Installa app sconosciute* per Downloader →
 in Downloader scrivi `btv-player.github.io/btv/apk` (porta sempre all'ultima release). Le istruzioni sono anche nella
 pagina `https://btv-player.github.io/btv/`.

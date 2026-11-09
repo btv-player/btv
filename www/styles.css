@@ -572,3 +572,15 @@ html, body { background: #050816; }
 #h-favs .ft-name { font-size: 1.05rem; margin-top: .25rem; }
 #h-favs .tile-now { font-size: .9rem; }
 #h-favs .tiles { padding-top: 0; }
+
+/* niente etichetta playlist/guida in alto */
+#playlist-name { display: none !important; }
+/* riordino dei preferiti */
+#grid-tools { display: flex; align-items: center; margin: 0 0 .6rem; }
+#grid-tools.hidden { display: none; }
+#reorder-hint { margin-left: 1.2rem; font-size: 1.1rem; color: #7fc4ff; }
+#grid.reordering .card { border-style: dashed; }
+.card.moving { border: .2rem solid #ffc93c !important; box-shadow: 0 0 2rem rgba(255, 201, 60, .7) !important; transform: scale(1.1); }
+
+/* pulsante Multivisione in alto: icona + scritta */
+.top-btn { margin-left: .6rem; padding: .7rem 1.3rem; border-radius: 3rem; font-size: 1.1rem; }
