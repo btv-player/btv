@@ -33,8 +33,8 @@ try {
     if (-not (Test-Path $keyFile)) {
       Write-Host "Prima volta: creo la tua chiave di firma personale ($keyFile)." -ForegroundColor Cyan
       Write-Host "Scegli una password di almeno 8 caratteri e conservala: servira' per ogni aggiornamento." -ForegroundColor Cyan
-      $pw = Read-Secret "Nuova password della chiave"
-      $pw2 = Read-Secret "Ripeti la password"
+      if ($env:BTV_KEY_PASSWORD) { $pw = $env:BTV_KEY_PASSWORD; $pw2 = $pw }   # già chiesta da publish-release.ps1
+      else { $pw = Read-Secret "Nuova password della chiave"; $pw2 = Read-Secret "Ripeti la password" }
       if ($pw -ne $pw2) { throw "Le password non coincidono" }
       if ($pw.Length -lt 8) { throw "Password troppo corta (minimo 8 caratteri)" }
       New-Item -ItemType Directory -Force $keyDir | Out-Null
@@ -43,6 +43,8 @@ try {
         -dname "CN=BTV" -storepass:env BTV_PW -keypass:env BTV_PW
       if ($LASTEXITCODE -ne 0) { throw "Creazione della chiave non riuscita" }
       Write-Host "Chiave creata. FANNE UNA COPIA DI SICUREZZA adesso: $keyFile" -ForegroundColor Yellow
+    } elseif ($env:BTV_KEY_PASSWORD) {
+      $pw = $env:BTV_KEY_PASSWORD                                            # già chiesta da publish-release.ps1
     } else {
       $pw = Read-Secret "Password della chiave di firma"
     }

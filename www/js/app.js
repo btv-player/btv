@@ -3,7 +3,7 @@
   'use strict';
 
   // ---------------------------------------------------------------- Config
-  var APP_VERSION = '1.8.9'; // aumentala a ogni aggiornamento: in Impostazioni vedi quale versione sta girando
+  var APP_VERSION = '1.9.0'; // aumentala a ogni aggiornamento: in Impostazioni vedi quale versione sta girando
   var PRESETS = [];      // nessuna lista precaricata: solo quelle che aggiungi tu
   // Guide TV gratuite in formato XMLTV (si possono disattivare o aggiungerne altre nelle Impostazioni).
   var DEFAULT_EPG = [];  // nessuna guida precaricata: quella della playlist + quelle che aggiungi tu
@@ -26,6 +26,8 @@
   var PAIR_MINUTES = 15;
   var VERSION_URL = 'https://btv-player.github.io/btv/version.json'; // solo lettura: numero dell'ultima versione
   var UPDATE_PREFIX = 'https://github.com/btv-player/btv/releases/download/';
+  var WEB_PREFIX = 'https://btv-player.github.io/btv/web/';           // aggiornamenti firmati per LG / Samsung
+  var TV_SELF_UPDATE = (platform === 'webos' || platform === 'tizen') && !!window.BTV_VERIFY;
   var MAX_DOWNLOAD = 60 * 1024 * 1024;  // playlist o guida scaricata: oltre è un errore (protegge la memoria della TV)          // validità del codice mostrato sulla TV       // riavvii automatici di fila prima di mostrare l'errore
 
   var KEYS = {
@@ -681,7 +683,9 @@
         }
         var apk = v.apk && typeof v.apk.url === 'string' && v.apk.url.indexOf(UPDATE_PREFIX) === 0 &&
           /^[0-9a-f]{64}$/.test(v.apk.sha256 || '') ? { url: v.apk.url, sha256: v.apk.sha256 } : null;
-        showUpdateBox({ version: v.version, apk: apk });
+        var web = v.web && typeof v.web.url === 'string' && v.web.url.indexOf(WEB_PREFIX) === 0 && /^[\w.-]+\.json$/.test(v.web.url.slice(WEB_PREFIX.length)) &&
+          /^[A-Za-z0-9+\/]{86}==$/.test(v.web.sig || '') ? { url: v.web.url, sig: v.web.sig } : null;
+        showUpdateBox({ version: v.version, apk: apk, web: web });
       }, function () { /* niente rete o file assente: si riprova più tardi */ });
   }
 
@@ -694,7 +698,7 @@
     $('side-info').classList.toggle('hidden', on);
     if (on) {
       $('upd-ver').textContent = 'Versione ' + u.version +
-        (platform === 'android' && u.apk ? ' · premi OK per installarla' : platform === 'web' ? ' · premi OK' : ' · si installa dal PC');
+        ((platform === 'android' && u.apk) || (TV_SELF_UPDATE && u.web) ? ' · premi OK per installarla' : platform === 'web' ? ' · premi OK' : ' · si installa dal PC');
     }
   }
 
@@ -711,6 +715,21 @@
         if (msg === 'PERMESSO') toast('Consenti a BTV di installare aggiornamenti (si è aperta l\'impostazione), poi premi di nuovo Aggiornamento', 9000);
         else toast('Aggiornamento non riuscito: ' + msg, 6000);
       });
+    } else if (TV_SELF_UPDATE && u.web) {
+      // LG / Samsung: scarica il codice nuovo, verifica la firma (chiave in boot.js) e lo usa dal prossimo avvio.
+      toast('Scarico la versione ' + u.version + '…', 10000);
+      fetch(u.web.url, { credentials: 'omit', cache: 'no-store', referrerPolicy: 'no-referrer' })
+        .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); })
+        .then(function (text) {
+          if (text.length > 4 * 1024 * 1024) throw new Error('file troppo grande');
+          if (!window.BTV_VERIFY(text, u.web.sig)) throw new Error('firma non valida');
+          var b = JSON.parse(text);
+          if (!b || b.version !== u.version || !newerVersion(b.version, APP_VERSION) || !b.files) throw new Error('versione non corrispondente');
+          if (!Store.set('webBundle', { text: text, sig: u.web.sig })) throw new Error('memoria piena');
+          toast('Versione ' + u.version + ' installata: riavvio BTV…', 4000);
+          setTimeout(function () { location.reload(); }, 1800);
+        })
+        .catch(function (e) { toast('Aggiornamento non riuscito: ' + (e && e.message || 'errore'), 7000); });
     } else if (platform === 'web') {
       location.reload();
     } else {
@@ -771,12 +790,21 @@
 
   // Analisi in un Web Worker (l'interfaccia resta fluida); se non disponibile, sul thread principale.
   var epgWorker = null, epgWorkerBroken = false;
+  function makeEpgWorker() {
+    var B = window.BTV_BUNDLE, f = B && B.files;
+    if (f && f['js/epg.js'] && f['js/epg-worker.js'] && f['vendor/pako_inflate.min.js'] && window.Blob && window.URL) {
+      var code = f['vendor/pako_inflate.min.js'] + '\n' + f['js/epg.js'] + '\n' + f['js/epg-worker.js'].replace(/importScripts\([^)]*\);?/, '');
+      return new Worker(URL.createObjectURL(new Blob([code], { type: 'application/javascript' })));
+    }
+    return new Worker('js/epg-worker.js');
+  }
+
   function parseGuide(bytes, now) {
     function onMain() { return EPG.parse(guideText(bytes), now); }
     if (epgWorkerBroken || !window.Worker) return Promise.resolve().then(onMain);
     return new Promise(function (resolve, reject) {
       try {
-        if (!epgWorker) epgWorker = new Worker('js/epg-worker.js');
+        if (!epgWorker) epgWorker = makeEpgWorker();
       } catch (e) {
         epgWorkerBroken = true;
         try { resolve(onMain()); } catch (x) { reject(x); }
@@ -1178,7 +1206,9 @@
     renderEpgSources();
     updateMultiPrefLabel();
     updateOptLabels();
-    $('app-version').textContent = 'BTV versione ' + APP_VERSION + '  ·  ' + platform +
+    var tvUpd = window.BTV_BUNDLE && window.BTV_BASE_VERSION && window.BTV_BUNDLE.version !== window.BTV_BASE_VERSION;
+    $('opt-reset-upd').classList.toggle('hidden', !tvUpd);
+    $('app-version').textContent = 'BTV versione ' + APP_VERSION + (tvUpd ? ' (aggiornata dalla TV, installata: ' + window.BTV_BASE_VERSION + ')' : '') + '  ·  ' + platform +
       (platform === 'android' && /^https:/.test(location.href) && !/localhost/.test(location.host) ? '  ·  aggiornamenti automatici attivi' : '');
     show('settings');
   }
@@ -2544,6 +2574,11 @@
       Nav.focus(firstMainItem() || activeGroupEl());
     },
     installUpdate: function () { installUpdate(); },
+    resetTvUpdate: function () {
+      Store.remove('webBundle');
+      toast('Torno alla versione installata: riavvio BTV…', 3000);
+      setTimeout(function () { location.reload(); }, 1500);
+    },
     toggleUpdCheck: function () {
       state.updCheck = !state.updCheck; Store.set('updCheck', state.updCheck); updateOptLabels();
       if (state.updCheck) checkUpdate(true); else showUpdateBox(null);
@@ -2796,4 +2831,5 @@
   show('browse', el.search);
   loadActive();
   setTimeout(function () { checkUpdate(true); }, 4000);                   // all'avvio
+  if (window.BTV_BUNDLE) { try { localStorage.setItem('bundleOk', window.BTV_BUNDLE.version); } catch (e) { /* ignora */ } }
 })();

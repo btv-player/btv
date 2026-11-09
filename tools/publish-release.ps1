@@ -1,13 +1,21 @@
-# Pubblica una nuova versione di BTV (per Fire TV e per chi installa l'APK):
+# Pubblica una nuova versione di BTV:
 #   powershell -ExecutionPolicy Bypass -File .\tools\publish-release.ps1
-# 1. compila l'APK firmato con la tua chiave (chiede la password)
-# 2. lo carica come "release" su GitHub (btv-player/btv)
-# 3. solo dopo pubblica www\version.json: le app vedono "Aggiornamento disponibile" e, se premi, installano
-#    questo APK verificandone l'impronta SHA-256 (e Android verifica che sia firmato con la stessa chiave).
+# Chiede UNA password (la stessa per le due chiavi, che restano solo su questo PC in %USERPROFILE%\.btv):
+#  1. Fire TV / Android: compila l'APK firmato e lo carica come "release" su GitHub (btv-player/btv)
+#  2. LG / Samsung: crea il pacchetto del codice e lo firma con la chiave Ed25519 (www\web\btv-<versione>.json)
+#  3. solo alla fine pubblica www\version.json: le app vedono "È disponibile un aggiornamento" e, se premi OK,
+#     installano verificando impronta (APK) o firma (TV). Senza le chiavi nessuno può pubblicare aggiornamenti validi.
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
 $gh = "C:\Program Files\GitHub CLI\gh.exe"
 $repo = 'btv-player/btv'
+
+function Read-Secret([string]$prompt) {
+  $s = Read-Host $prompt -AsSecureString
+  $b = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($s)
+  try { return [Runtime.InteropServices.Marshal]::PtrToStringBSTR($b) } finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($b) }
+}
+
 Push-Location $root
 try {
   $ver = ([regex]::Match((Get-Content www\js\app.js -Raw), "APP_VERSION = '(\d+\.\d+\.\d+)'")).Groups[1].Value
@@ -17,10 +25,31 @@ try {
   if ($LASTEXITCODE -eq 0) { throw "La versione $ver e' gia' pubblicata: aumenta APP_VERSION in www\js\app.js" }
   if (git status --porcelain) { throw "Ci sono modifiche non salvate in git: prima salvale (commit) e pubblicale" }
 
-  Write-Host "Compilo BTV $ver firmato..." -ForegroundColor Cyan
+  $first = -not (Test-Path (Join-Path $env:USERPROFILE ".btv\btv-release.p12"))
+  if ($first) { Write-Host "Prima pubblicazione: scegli una password di almeno 8 caratteri e conservala." -ForegroundColor Cyan }
+  $pw = Read-Secret "Password delle chiavi di firma"
+  if ($first) { if ($pw -ne (Read-Secret "Ripeti la password")) { throw "Le password non coincidono" } }
+  if ($pw.Length -lt 8) { throw "Password troppo corta (minimo 8 caratteri)" }
+  $env:BTV_KEY_PASSWORD = $pw
+  $pw = $null
+
+  # Chiave per le TV: la prima volta si crea e la sua parte pubblica entra nell'app (www\js\boot.js)
+  node tools/sign-web.js init
+  if ($LASTEXITCODE -ne 0) { throw "Chiave di firma per le TV non disponibile" }
+  if (git status --porcelain www/js/boot.js) {
+    git add www/js/boot.js
+    git commit -q -m "Chiave pubblica per gli aggiornamenti firmati delle TV"
+    Write-Host "IMPORTANTE: reinstalla BTV sulla LG una volta (tools\install-lg.ps1): da li' in poi si aggiorna dalla TV." -ForegroundColor Yellow
+  }
+
+  Write-Host "Compilo BTV $ver firmato per Fire TV / Android..." -ForegroundColor Cyan
   & powershell -ExecutionPolicy Bypass -File tools\build-apk.ps1
   if ($LASTEXITCODE -ne 0) { throw "Compilazione non riuscita" }
   $sha = (Get-FileHash dist\BTV.apk -Algorithm SHA256).Hash.ToLower()
+
+  Write-Host "Firmo l'aggiornamento per LG / Samsung..." -ForegroundColor Cyan
+  $web = node tools/sign-web.js publish | ConvertFrom-Json
+  if ($LASTEXITCODE -ne 0 -or -not $web.sig) { throw "Firma dell'aggiornamento TV non riuscita" }
 
   Write-Host "Carico la release $tag su GitHub..." -ForegroundColor Cyan
   & $gh release create $tag dist\BTV.apk --repo $repo --title "BTV $ver" --notes "BTV $ver per Fire TV / Android TV. SHA-256 dell'APK: $sha"
@@ -29,14 +58,16 @@ try {
   $json = [ordered]@{
     version = $ver
     apk = [ordered]@{ url = "https://github.com/$repo/releases/download/$tag/BTV.apk"; sha256 = $sha }
+    web = [ordered]@{ url = $web.url; sig = $web.sig }
   } | ConvertTo-Json
   [IO.File]::WriteAllText((Join-Path $root 'www\version.json'), $json + "`n")
-  git add www/version.json
+  git add www/version.json updates/web
   git commit -q -m "Versione $ver pubblicata"
   git push -q
   Write-Host ""
-  Write-Host "Fatto: BTV $ver pubblicata. Le app la segnaleranno al prossimo ritorno nella home." -ForegroundColor Green
+  Write-Host "Fatto: BTV $ver pubblicata. Le app la segnaleranno al prossimo ritorno nella Home." -ForegroundColor Green
   Write-Host "Link diretto all'APK: https://github.com/$repo/releases/download/$tag/BTV.apk" -ForegroundColor Green
 } finally {
+  Remove-Item Env:BTV_KEY_PASSWORD -ErrorAction SilentlyContinue
   Pop-Location
 }

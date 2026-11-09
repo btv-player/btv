@@ -33,12 +33,22 @@ if (target === 'webos') {
   fs.writeFileSync(cfgPath, fs.readFileSync(cfgPath, 'utf8').replace(/(<widget[^>]*\sversion=")[^"]*/, '$1' + appVer));
 }
 
+// Autoaggiornamento firmato: la pagina installata è un "guscio" che avvia js/boot.js; boot sceglie tra la versione
+// installata (js/base-bundle.js) e un aggiornamento scaricato e firmato (vedi www/js/boot.js).
+fs.rmSync(path.join(dist, 'web'), { recursive: true, force: true });   // pacchetti firmati pubblicati: non servono qui
+const buildBundle = require('./web-bundle.js');
+const baseBundle = buildBundle(root);
+fs.writeFileSync(path.join(dist, 'js', 'base-bundle.js'), 'window.BTV_BASE = ' + JSON.stringify(baseBundle) + ';\n');
+const srcHtml = fs.readFileSync(path.join(root, 'www', 'index.html'), 'utf8');
+const head = (/<head>([\s\S]*?)<\/head>/i.exec(srcHtml) || [])[1].replace(/\s*<link rel="stylesheet"[^>]*>/i, '');
+fs.writeFileSync(path.join(dist, 'index.html'),
+  '<!DOCTYPE html>\n<html lang="it">\n<head>' + head + '</head>\n<body>\n' +
+  // Libreria Samsung (fornita dalla TV): serve per disattivare il salvaschermo durante la visione.
+  (target === 'tizen' ? '<script src="$WEBAPIS/webapis/webapis.js"></script>\n' : '') +
+  '<script src="vendor/nacl.min.js"></script>\n<script src="js/base-bundle.js"></script>\n<script src="js/boot.js"></script>\n</body>\n</html>\n');
+
 if (target === 'tizen') {
   fs.copyFileSync(path.join(assets, 'icon-512.png'), path.join(dist, 'icon.png'));
-  // Libreria Samsung (fornita dalla TV): serve per disattivare il salvaschermo durante la visione.
-  const idx = path.join(dist, 'index.html');
-  fs.writeFileSync(idx, fs.readFileSync(idx, 'utf8').replace('<script src="vendor/hls.min.js">',
-    '<script src="$WEBAPIS/webapis/webapis.js"></script>\n<script src="vendor/hls.min.js">'));
 } else {
   fs.copyFileSync(path.join(assets, 'icon-80.png'), path.join(dist, 'icon.png'));
   fs.copyFileSync(path.join(assets, 'icon-130.png'), path.join(dist, 'largeIcon.png'));
