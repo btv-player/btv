@@ -584,3 +584,16 @@ html, body { background: #050816; }
 
 /* pulsante Multivisione in alto: icona + scritta */
 .top-btn { margin-left: .6rem; padding: .7rem 1.3rem; border-radius: 3rem; font-size: 1.1rem; }
+
+/* ===== TV e Fire TV (body.low-power): stesso aspetto, senza effetti costosi per i processori delle TV =====
+   niente animazioni, niente ingrandimenti, niente ombre sfocate e sfondo a sfumature: il focus resta ben visibile
+   con un bordo luminoso netto (un'ombra senza sfocatura costa pochissimo). */
+.low-power *, .low-power *::before, .low-power *::after { transition: none !important; }
+.low-power #app { background-image: none; background-color: #060a1c; }
+.low-power .panel, .low-power .card, .low-power .btn, .low-power .ibtn, .low-power .group, .low-power .hg-row,
+.low-power .ftile, .low-power .qtile, .low-power .ctile, .low-power .tile, .low-power .brand-logo, .low-power #toast,
+.low-power #search, .low-power .pv-prog i, .low-power .pv-live span, .low-power #picker, .low-power #guide,
+.low-power .pair-box, .low-power .pl-row, .low-power .form-row input { box-shadow: none !important; }
+.low-power .focused { transform: none !important; box-shadow: 0 0 0 .22rem #8fd0ff !important; }
+.low-power .pv-info, .low-power .ts-hint { text-shadow: none; }
+.low-power .pv-bar { background: rgba(0, 0, 0, .55); }

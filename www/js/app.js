@@ -3,7 +3,7 @@
   'use strict';
 
   // ---------------------------------------------------------------- Config
-  var APP_VERSION = '1.8.7'; // aumentala a ogni aggiornamento: in Impostazioni vedi quale versione sta girando
+  var APP_VERSION = '1.8.8'; // aumentala a ogni aggiornamento: in Impostazioni vedi quale versione sta girando
   var PRESETS = [];      // nessuna lista precaricata: solo quelle che aggiungi tu
   // Guide TV gratuite in formato XMLTV (si possono disattivare o aggiungerne altre nelle Impostazioni).
   var DEFAULT_EPG = [];  // nessuna guida precaricata: quella della playlist + quelle che aggiungi tu
@@ -15,6 +15,7 @@
   var OSD_TIME = 5000;
   var TIMESHIFT_SECONDS = LOW_POWER ? 300 : 600;   // "torna indietro"/pausa: 5 min su TV, 10 su PC
   var BUFFER_BYTES = (LOW_POWER ? 60 : 150) * 1000 * 1000;
+  var LIVE_AHEAD = 30;                             // secondi scaricati in anticipo mentre si guarda
   var DEAD_TTL = 12 * 3600e3;  // un canale che non va resta segnato per 12 ore (poi si riprova)
   var SEEK_STEP = 30;          // secondi per ogni pressione di ◀ / ▶ / ⏪ / ⏩
   var LIVE_TOLERANCE = 6;      // entro questi secondi dalla diretta si è "in diretta"
@@ -418,6 +419,8 @@
     el.grid.innerHTML = '';
     el.grid.classList.add('hidden');
     el.status.classList.add('hidden');
+    $('grid-tools').classList.add('hidden');                              // "Riordina" solo nella cartella Preferiti
+    if (state.reorder) stopReorder();
     el.home.classList.remove('hidden');
     renderHome();
     if (!state.pv.ch) {
@@ -430,12 +433,34 @@
 
   function renderHome() {
     var now = Date.now();
-    // Guida: i canali nell'ordine della playlist (preferiti prima), con il programma in onda
     var favs = favChannels();
-    // Guida: tutti i canali in ordine di numero, dall'1 in poi
-    var list = state.channels.slice().sort(function (a, b) { return a.num - b.num; }).slice(0, 400);
+    // Guida: tutti i canali in ordine di numero, dall'1 in poi. Si ricostruisce solo se cambia la playlist,
+    // e le righe si creano a blocchi (le TV caricano subito tutti i loghi: con 260 righe insieme andava a scatti).
+    var key = state.activeId + ':' + state.channels.length;
+    if (state.hgKey !== key || !el.hgList.children.length) {
+      state.hgKey = key;
+      state.hgAll = state.channels.slice().sort(function (a, b) { return a.num - b.num; });
+      el.hgList.innerHTML = '';
+      el.hgList.scrollTop = 0;
+      renderGuideRows(HG_PAGE);
+    } else {
+      Array.prototype.forEach.call(el.hgList.children, function (r) {
+        var ch = channelByUrl(r.getAttribute('data-url'));
+        if (ch) fillGuideRow(r, ch, now);
+      });
+    }
+    updateClock();
+    renderHomeTiles(favs, now);
+  }
+
+  var HG_PAGE = 40;
+  // Aggiunge alla guida della Home le prossime "count" righe.
+  function renderGuideRows(count) {
+    var list = state.hgAll || [], start = el.hgList.children.length, now = Date.now();
+    var end = Math.min(list.length, start + count);
+    if (start >= end) return;
     var frag = document.createDocumentFragment();
-    list.forEach(function (ch) {
+    list.slice(start, end).forEach(function (ch) {
       var r = document.createElement('div');
       r.className = 'hg-row focusable';
       r.setAttribute('data-action', 'homePlay');
@@ -454,9 +479,10 @@
       fillGuideRow(r, ch, now);
       frag.appendChild(r);
     });
-    el.hgList.innerHTML = '';
     el.hgList.appendChild(frag);
-    updateClock();
+  }
+
+  function renderHomeTiles(favs, now) {
 
     // Preferiti: fino a 8 loghi
     var ft = $('hf-tiles');
@@ -1086,6 +1112,7 @@
     var c = Nav.current();
     clearTimeout(state.timers.group);
     clearTimeout(state.pv.timer);
+    if (c && c.classList.contains('hg-row') && !c.nextSibling) renderGuideRows(HG_PAGE);
     if (c && c.getAttribute('data-url') && c.classList.contains('hg-row')) {
       state.pv.timer = setTimeout(function () { var ch = channelByUrl(c.getAttribute('data-url')); if (ch) previewPlay(ch); }, 700);
     }
@@ -1266,7 +1293,7 @@
       lowLatencyMode: false,
       // Timeshift: conserva ciò che hai già visto e continua a scaricare mentre sei in pausa.
       backBufferLength: TIMESHIFT_SECONDS,
-      maxBufferLength: TIMESHIFT_SECONDS,
+      maxBufferLength: LIVE_AHEAD,          // mentre guardi: 30 s di anticipo (in pausa si allarga, vedi sotto)
       maxMaxBufferLength: TIMESHIFT_SECONDS,
       maxBufferSize: BUFFER_BYTES,
       manifestLoadingMaxRetry: 2,
@@ -2719,9 +2746,16 @@
     Nav.focus(t);
     activate(t);
   });
+  el.hgList.addEventListener('scroll', function () {
+    if (el.hgList.scrollTop + el.hgList.clientHeight > el.hgList.scrollHeight - 400) renderGuideRows(HG_PAGE);
+  });
   el.grid.addEventListener('scroll', function () {
     if (el.grid.scrollTop + el.grid.clientHeight > el.grid.scrollHeight - 600 && state.rendered < state.filtered.length) renderMore();
   });
+  // In pausa la diretta continua a scaricarsi (fino al limite del timeshift) per riprendere senza buchi;
+  // mentre guardi basta un piccolo anticipo: meno rete e meno lavoro per la TV.
+  el.video.addEventListener('pause', function () { if (state.hls) state.hls.config.maxBufferLength = TIMESHIFT_SECONDS; });
+  el.video.addEventListener('play', function () { if (state.hls) state.hls.config.maxBufferLength = LIVE_AHEAD; });
   ['pause', 'play', 'seeked'].forEach(function (ev) {
     el.video.addEventListener(ev, function () { if (osdVisible()) updateShift(); });
   });
@@ -2733,6 +2767,7 @@
   Nav.setCustom(customNav);
   registerTvKeys();
   document.body.classList.add('platform-' + platform);
+  if (LOW_POWER) document.body.classList.add('low-power');            // TV e Fire TV: niente effetti pesanti
   window.BTV = { state: state };                                     // utile per il debug dalla console
   setInterval(refreshEpgViews, 60000);
   setInterval(function () { updateClock(); refreshHome(); }, 30000);                                    // "in onda" aggiornato ogni minuto
