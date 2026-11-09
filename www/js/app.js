@@ -3,7 +3,7 @@
   'use strict';
 
   // ---------------------------------------------------------------- Config
-  var APP_VERSION = '1.8.2'; // aumentala a ogni aggiornamento: in Impostazioni vedi quale versione sta girando
+  var APP_VERSION = '1.8.3'; // aumentala a ogni aggiornamento: in Impostazioni vedi quale versione sta girando
   var PRESETS = [];      // nessuna lista precaricata: solo quelle che aggiungi tu
   // Guide TV gratuite in formato XMLTV (si possono disattivare o aggiungerne altre nelle Impostazioni).
   var DEFAULT_EPG = [];  // nessuna guida precaricata: quella della playlist + quelle che aggiungi tu
@@ -465,7 +465,7 @@
       e.textContent = 'Premi Menu o il tasto Rosso su un canale per aggiungerlo ai preferiti.';
       ft.appendChild(e);
     }
-    favs.slice(0, 8).forEach(function (ch) {
+    favs.slice(0, 6).forEach(function (ch) {
       var d = document.createElement('div');
       d.className = 'ftile focusable';
       d.setAttribute('data-action', 'homePlay');
@@ -477,7 +477,21 @@
       ft.appendChild(d);
     });
 
-    // Canale precedente e più visti
+    renderQuick();
+  }
+
+  // Canale "guardato": aperto a schermo intero, oppure rimasto almeno 10 secondi nell'anteprima della Home.
+  // Il canale guardato prima diventa il "Canale precedente" (ricordato anche dopo un riavvio).
+  function noteWatching(url) {
+    if (!url) return;
+    var cur = state.curUrl || Store.get('lastChannel', '');
+    if (cur && cur !== url) { state.prevUrl = cur; Store.set('prevChannel', cur); }
+    state.curUrl = url;
+    Store.set('lastChannel', url);
+  }
+
+  // Riquadri "Canale precedente" e "Più visti" (si aggiornano da soli, senza ridisegnare la Home).
+  function renderQuick() {
     var qp = $('hq-prev');
     qp.innerHTML = '';
     var prev = channelByUrl(state.prevUrl || Store.get('prevChannel', ''));
@@ -579,6 +593,7 @@
     v.removeAttribute('src');
     try { v.load(); } catch (e) { /* ignora */ }
     pv.playingUrl = '';
+    clearTimeout(pv.watchTimer);
     el.pvPanel.classList.remove('loading');
   }
 
@@ -593,6 +608,13 @@
     pv.ch = ch;
     if (blockedLan(ch.url)) return;
     pv.playingUrl = ch.url;
+    clearTimeout(pv.watchTimer);
+    pv.watchTimer = setTimeout(function () {                              // 10 secondi in anteprima = "guardato"
+      if (pv.playingUrl !== ch.url || state.screen !== 'browse') return;
+      var before = state.prevUrl;
+      noteWatching(ch.url);
+      if (state.prevUrl !== before) renderQuick();
+    }, 10000);
     var v = el.pvVideo;
     el.pvPanel.classList.add('loading');
     v.onplaying = function () { el.pvPanel.classList.remove('loading'); };
@@ -850,8 +872,27 @@
     return n;
   }
 
+  // Icona a tema per una categoria senza loghi (dal nome).
+  function catIcon(name) {
+    var n = String(name).toLowerCase();
+    if (/sport|calcio|dazn|eurosport|basket|volley|tennis|motor|f1|golf|nba|serie a/.test(n)) return 'trophy';
+    if (/cinema|film|movie|netflix|prime|disney|apple|vod|serie/.test(n)) return 'film';
+    if (/kid|bambin|cartoon|ragazzi|junior/.test(n)) return 'smile';
+    if (/music|musica|radio|mtv/.test(n)) return 'music';
+    if (/news|notizie|tg|informazione/.test(n)) return 'news';
+    if (/doc|natura|scienza|storia|discovery/.test(n)) return 'doc';
+    if (/world|mondo|international|estero/.test(n)) return 'globe';
+    return 'tv';
+  }
+
   function renderGroups() {
     el.groups.innerHTML = '';
+    // Logo di categoria solo se la playlist lo indica (group-logo); altrimenti un'icona a tema dal nome
+    var groupLogos = {};
+    state.channels.forEach(function (ch) {
+      if (!ch.groupLogo || !safeUrl(ch.groupLogo) || blockedLan(ch.groupLogo)) return;
+      ch.groups.forEach(function (gid) { if (!groupLogos[gid]) groupLogos[gid] = ch.groupLogo; });
+    });
     var items = [
       { id: '__home', name: 'Home', icon: 'home', count: '' },
       { id: '__fav', name: 'Preferiti', icon: 'starf', count: favCount() },
@@ -862,7 +903,21 @@
       b.className = 'group focusable' + (g.id === state.group ? ' active' : '');
       b.setAttribute('data-group', g.id);
       var n = document.createElement('span'); n.className = 'gname';
-      setIc(n, g.icon || 'folder', g.name);
+      if (g.icon) setIc(n, g.icon, g.name);
+      else {
+        // Categoria: il suo logo se la playlist lo indica, altrimenti un'icona a tema
+        var lg = document.createElement('span'); lg.className = 'glogo';
+        var src = groupLogos[g.id];
+        if (src) {
+          var img = new Image(); img.alt = ''; img.setAttribute('loading', 'lazy');
+          img.onerror = function () { this.parentNode.innerHTML = Icons.svg(catIcon(this.getAttribute('data-name'))); };
+          img.setAttribute('data-name', g.name);
+          img.src = src;
+          lg.appendChild(img);
+        } else lg.innerHTML = Icons.svg(catIcon(g.name));
+        var tx = document.createElement('span'); tx.className = 'ict'; tx.textContent = g.name;
+        n.appendChild(lg); n.appendChild(tx);
+      }
       var c = document.createElement('span'); c.className = 'gcount'; c.textContent = g.count;
       b.appendChild(n); b.appendChild(c);
       el.groups.appendChild(b);
@@ -1107,7 +1162,7 @@
     if (!n) return;
     i = ((i % n) + n) % n;
     state.playIdx = i;
-    if (state.playing && state.playing.url !== state.playList[i].url) { state.prevUrl = state.playing.url; Store.set('prevChannel', state.prevUrl); }
+    noteWatching(state.playList[i].url);
     state.playing = state.playList[i];
     state.stallRetries = 0;
     Store.set('lastChannel', state.playing.url);

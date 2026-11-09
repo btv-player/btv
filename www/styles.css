@@ -521,3 +521,32 @@ html, body { background: #050816; }
 #h-favs .ftile { height: 7.4rem; }
 #h-favs .ft-logo { height: 3.8rem; }
 #hq-top .qtile { height: 7.6rem; }
+
+/* cartelle con il logo della categoria (o del suo primo canale) */
+.group .gname { display: flex; align-items: center; }
+.glogo { width: 3.2rem; height: 2rem; flex: none; margin-right: .7rem; display: flex; align-items: center; justify-content: center;
+  border-radius: .45rem; background: rgba(255, 255, 255, .06); overflow: hidden; }
+.glogo img { max-width: 92%; max-height: 88%; object-fit: contain; }
+.glogo .ic { width: 1.4rem; height: 1.4rem; margin: 0; color: #9fb6ff; }
+.group.active .glogo, .group.focused .glogo { background: rgba(255, 255, 255, .16); }
+.group .gname .ict { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* preferiti: 3 per riga, logo, nome e programma leggibili */
+#h-favs .ftile { width: 32%; margin: 0 2% 2% 0; height: 9.6rem; padding: .4rem .5rem; }
+#h-favs .ftile:nth-child(4n) { margin-right: 2%; }
+#h-favs .ftile:nth-child(3n) { margin-right: 0; }
+#h-favs .ft-logo { height: 4.6rem; width: 85%; }
+#h-favs .ft-name { font-size: 1.15rem; font-weight: 700; margin-top: .35rem; }
+#h-favs .tile-now { font-size: 1rem; color: #b8c3e6; }
+
+/* icone a tema delle categorie: colori come nei riquadri della Home */
+.glogo { background: transparent; width: 2.2rem; }
+.glogo .ic { width: 1.6rem; height: 1.6rem; }
+.glogo .ic-trophy { color: #ffc23c; }
+.glogo .ic-film { color: #b06bff; }
+.glogo .ic-smile { color: #ffd23c; }
+.glogo .ic-music { color: #4fb0ff; }
+.glogo .ic-news, .glogo .ic-doc { color: #58c8ff; }
+.glogo .ic-tv, .glogo .ic-globe { color: #7fc4ff; }
+.group.active .glogo .ic, .group.focused .glogo .ic { color: #fff; }
+.group.active .glogo, .group.focused .glogo { background: transparent; }

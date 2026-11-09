@@ -49,7 +49,8 @@ var M3U = (function () {
           logo: a['tvg-logo'] || '',
           group: a['group-title'] || '',
           tvgId: a['tvg-id'] || '',
-          chno: a['tvg-chno'] || ''
+          chno: a['tvg-chno'] || '',
+          groupLogo: a['group-logo'] || ''   // raro: logo della categoria, se la playlist lo indica
         };
       } else if (l.indexOf('#EXTGRP:') === 0) {
         if (cur && !cur.group) cur.group = l.slice(8).trim();
