@@ -3,7 +3,7 @@
   'use strict';
 
   // ---------------------------------------------------------------- Config
-  var APP_VERSION = '1.9.1'; // aumentala a ogni aggiornamento: in Impostazioni vedi quale versione sta girando
+  var APP_VERSION = '1.9.2'; // aumentala a ogni aggiornamento: in Impostazioni vedi quale versione sta girando
   var PRESETS = [];      // nessuna lista precaricata: solo quelle che aggiungi tu
   // Guide TV gratuite in formato XMLTV (si possono disattivare o aggiungerne altre nelle Impostazioni).
   var DEFAULT_EPG = [];  // nessuna guida precaricata: quella della playlist + quelle che aggiungi tu
@@ -27,7 +27,6 @@
   var VERSION_URL = 'https://btv-player.github.io/btv/version.json'; // solo lettura: numero dell'ultima versione
   var UPDATE_PREFIX = 'https://github.com/btv-player/btv/releases/download/';
   var WEB_PREFIX = 'https://btv-player.github.io/btv/web/';           // aggiornamenti firmati per LG / Samsung
-  var TV_SELF_UPDATE = (platform === 'webos' || platform === 'tizen') && !!window.BTV_VERIFY;
   var MAX_DOWNLOAD = 60 * 1024 * 1024;  // playlist o guida scaricata: oltre è un errore (protegge la memoria della TV)          // validità del codice mostrato sulla TV       // riavvii automatici di fila prima di mostrare l'errore
 
   var KEYS = {
@@ -46,6 +45,8 @@
 
   // ---------------------------------------------------------------- Stato
   var platform = detectPlatform();
+  // Va calcolato dopo platform (prima era sopra e risultava sempre falso: la TV diceva "si installa dal PC").
+  var TV_SELF_UPDATE = (platform === 'webos' || platform === 'tizen') && !!window.BTV_VERIFY;
   // BTV funziona solo come app installata su TV e Fire TV: nessun accesso da browser o telefono
   // (il browser resta solo per lo sviluppo, su questo PC).
   if (platform === 'web' && !/^(localhost|127\.0\.0\.1)$/.test(location.hostname)) {
