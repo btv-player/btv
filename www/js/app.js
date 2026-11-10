@@ -3,7 +3,7 @@
   'use strict';
 
   // ---------------------------------------------------------------- Config
-  var APP_VERSION = '1.9.0'; // aumentala a ogni aggiornamento: in Impostazioni vedi quale versione sta girando
+  var APP_VERSION = '1.9.1'; // aumentala a ogni aggiornamento: in Impostazioni vedi quale versione sta girando
   var PRESETS = [];      // nessuna lista precaricata: solo quelle che aggiungi tu
   // Guide TV gratuite in formato XMLTV (si possono disattivare o aggiungerne altre nelle Impostazioni).
   var DEFAULT_EPG = [];  // nessuna guida precaricata: quella della playlist + quelle che aggiungi tu
@@ -1157,9 +1157,7 @@
     clearTimeout(state.timers.group);
     clearTimeout(state.pv.timer);
     if (c && c.classList.contains('hg-row') && !c.nextSibling) renderGuideRows(HG_PAGE);
-    if (c && c.getAttribute('data-url') && c.classList.contains('hg-row')) {
-      state.pv.timer = setTimeout(function () { var ch = channelByUrl(c.getAttribute('data-url')); if (ch) previewPlay(ch); }, 700);
-    }
+    // Muoversi nella guida NON cambia canale: si cambia solo con OK.
     if (c && c.classList.contains('group')) {
       state.timers.group = setTimeout(function () { selectGroup(c.getAttribute('data-group')); }, 280);
     }
