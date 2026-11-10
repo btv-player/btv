@@ -1,0 +1,33 @@
+# Tiene attiva la modalità sviluppatore della TV LG (altrimenti scade dopo 50 ore e BTV non si apre più).
+# Ogni giorno chiama direttamente il servizio di LG con il codice della TV, custodito nel segreto
+# cifrato LG_DEVMODE_TOKEN. Nessun server di terzi; il codice non viene mai stampato nei log.
+# Se il rinnovo fallisce, il workflow risulta "fallito" e GitHub ti manda una email.
+name: Rinnovo modalita' sviluppatore LG
+
+on:
+  schedule:
+    - cron: '17 3 * * *'      # ogni giorno alle 03:17 UTC
+    - cron: '17 15 * * *'     # e alle 15:17 UTC (se una esecuzione salta, la sessione resta comunque valida)
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  rinnova:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Rinnova la sessione
+        env:
+          TOKEN: ${{ secrets.LG_DEVMODE_TOKEN }}
+        run: |
+          if [ -z "$TOKEN" ]; then echo "Segreto LG_DEVMODE_TOKEN mancante"; exit 1; fi
+          code=$(curl -sS -o resp.txt -w '%{http_code}' --max-time 60 \
+            "https://developer.lge.com/secure/ResetDevModeSession.dev?sessionToken=${TOKEN}") || { echo "LG non raggiungibile"; exit 1; }
+          echo "Risposta HTTP: $code"
+          if [ "$code" != "200" ] || ! grep -qi '"result" *: *"success"' resp.txt; then
+            echo "Rinnovo rifiutato da LG (codice della TV cambiato o sessione gia' scaduta)."
+            sed 's/[A-Za-z0-9]\{32,\}/***/g' resp.txt | head -c 300; echo
+            exit 1
+          fi
+          echo "Sessione rinnovata."
