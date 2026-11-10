@@ -81,7 +81,7 @@ try {
     web = [ordered]@{ url = $web.url; sig = $web.sig }
   } | ConvertTo-Json
   [IO.File]::WriteAllText((Join-Path $root 'www\version.json'), $json + "`n")
-  git add www/version.json updates/web
+  git add www/version.json updates/web android/app/build.gradle   # build.gradle: versione scritta da patch-android
   git commit -q -m "Versione $ver pubblicata"
   git push -q
   Write-Host ""
