@@ -22,7 +22,7 @@ try {
   $ver = ([regex]::Match((Get-Content www\js\app.js -Raw), "APP_VERSION = '(\d+\.\d+\.\d+)'")).Groups[1].Value
   if (-not $ver) { throw "APP_VERSION non trovata in www\js\app.js" }
   $tag = "v$ver"
-  & $gh release view $tag --repo $repo *> $null
+  cmd /c "`"$gh`" release view $tag --repo $repo >nul 2>&1"   # via cmd: in PowerShell 5.1 stderr redirezionato = errore
   if ($LASTEXITCODE -eq 0) { throw "La versione $ver e' gia' pubblicata: aumenta APP_VERSION in www\js\app.js" }
   if (git status --porcelain) { throw "Ci sono modifiche non salvate in git: prima salvale (commit) e pubblicale" }
 
