@@ -25,9 +25,14 @@ try {
   $ipk = Get-ChildItem $ipkDir -Filter *.ipk | Select-Object -First 1
 
   # Aggiornamento: se la TV è già registrata con lo stesso IP e la chiave c'è, non serve rifare la passphrase.
+  # ares di questa versione non conserva la passphrase: si usa la copia sbloccata btvtv_webos_open, se c'e'.
+  $openKey = Join-Path $env:USERPROFILE ".ssh\btvtv_webos_open"
   $keyFile = Join-Path $env:USERPROFILE ".ssh\btvtv_webos"
   $known = ((ares-setup-device --list) -join "`n") -match "btvtv\s+prisoner@$([regex]::Escape($Ip)):9922"
-  if ($known -and (Test-Path $keyFile)) {
+  if ($known -and (Test-Path $openKey)) {
+    Write-Host "TV gia' registrata: aggiorno l'app." -ForegroundColor Cyan
+    ares-setup-device -m btvtv -i "privatekey=btvtv_webos_open" | Out-Null
+  } elseif ($known -and (Test-Path $keyFile)) {
     Write-Host "TV gia' registrata: aggiorno l'app." -ForegroundColor Cyan
   } else {
     Write-Host "Registro la TV ($Ip)..." -ForegroundColor Cyan
