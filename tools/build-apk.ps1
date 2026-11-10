@@ -6,7 +6,7 @@
 # La chiave di firma sta FUORI dal progetto: %USERPROFILE%\.btv\btv-release.p12
 # Fanne una copia (chiavetta USB o cloud privato): senza la stessa chiave non potrai piu' aggiornare l'app
 # installata, solo disinstallarla e reinstallarla (perdendo preferiti e impostazioni).
-# La password viene chiesta ogni volta, non viene mai salvata su disco.
+# Con publish-release.ps1 la password e' casuale e protetta dal tuo account Windows (DPAPI); da solo la chiede.
 param([switch]$Debug)
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent

@@ -1,6 +1,7 @@
 # Pubblica una nuova versione di BTV:
 #   powershell -ExecutionPolicy Bypass -File .\tools\publish-release.ps1
-# Chiede UNA password (la stessa per le due chiavi, che restano solo su questo PC in %USERPROFILE%\.btv):
+# Non chiede password: le due chiavi restano solo su questo PC (%USERPROFILE%\.btv), protette da una password
+# casuale cifrata con il tuo account Windows. Copia di sicurezza: tools\backup-keys.ps1
 #  1. Fire TV / Android: compila l'APK firmato e lo carica come "release" su GitHub (btv-player/btv)
 #  2. LG / Samsung: crea il pacchetto del codice e lo firma con la chiave Ed25519 (www\web\btv-<versione>.json)
 #  3. solo alla fine pubblica www\version.json: le app vedono "È disponibile un aggiornamento" e, se premi OK,
@@ -25,13 +26,32 @@ try {
   if ($LASTEXITCODE -eq 0) { throw "La versione $ver e' gia' pubblicata: aumenta APP_VERSION in www\js\app.js" }
   if (git status --porcelain) { throw "Ci sono modifiche non salvate in git: prima salvale (commit) e pubblicale" }
 
-  $first = -not (Test-Path (Join-Path $env:USERPROFILE ".btv\btv-release.p12"))
-  if ($first) { Write-Host "Prima pubblicazione: scegli una password di almeno 8 caratteri e conservala." -ForegroundColor Cyan }
-  $pw = Read-Secret "Password delle chiavi di firma"
-  if ($first) { if ($pw -ne (Read-Secret "Ripeti la password")) { throw "Le password non coincidono" } }
-  if ($pw.Length -lt 8) { throw "Password troppo corta (minimo 8 caratteri)" }
+  # Password delle chiavi: casuale, generata qui, salvata cifrata con il TUO account Windows (DPAPI).
+  # Solo questo utente su questo PC la puo' leggere; per un altro PC usa tools\backup-keys.ps1.
+  $keyDir = Join-Path $env:USERPROFILE ".btv"
+  $pwFile = Join-Path $keyDir "key-password.dpapi"
+  $first = -not (Test-Path (Join-Path $keyDir "btv-release.p12"))
+  if (Test-Path $pwFile) {
+    $sec = (Get-Content $pwFile -Raw).Trim() | ConvertTo-SecureString
+    $b = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($sec)
+    try { $pw = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($b) } finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($b) }
+  } else {
+    if ($first) {
+      $bytes = New-Object byte[] 32
+      $rng = [Security.Cryptography.RandomNumberGenerator]::Create(); $rng.GetBytes($bytes); $rng.Dispose()
+      $pw = [Convert]::ToBase64String($bytes)
+      Write-Host "Prima pubblicazione: creo le chiavi con una password casuale protetta dal tuo account Windows." -ForegroundColor Cyan
+    } else {
+      # Chiavi gia' create con una password scelta a mano: chiesta un'ultima volta, poi salvata protetta
+      $pw = Read-Secret "Password delle chiavi di firma (ultima volta)"
+    }
+    New-Item -ItemType Directory -Force $keyDir | Out-Null
+    $sec = ConvertTo-SecureString $pw -AsPlainText -Force
+    [IO.File]::WriteAllText($pwFile, (ConvertFrom-SecureString $sec))
+  }
+  if ($pw.Length -lt 8) { throw "Password delle chiavi non valida" }
   $env:BTV_KEY_PASSWORD = $pw
-  $pw = $null
+  $pw = $null; $sec = $null
 
   # Chiave per le TV: la prima volta si crea e la sua parte pubblica entra nell'app (www\js\boot.js)
   node tools/sign-web.js init
