@@ -10,7 +10,7 @@
  */
 (function () {
   'use strict';
-  var PUBKEY = '';            // chiave pubblica Ed25519 (base64), scritta da: node tools/sign-web.js init
+  var PUBKEY = 'ZYV94EKXJ0p+VAgRsGvVrV2oa6sTVQTWnSZhELbfbmQ=';            // chiave pubblica Ed25519 (base64), scritta da: node tools/sign-web.js init
   var base = window.BTV_BASE;
   var st = null;
   try { st = window.localStorage; } catch (e) { /* niente memoria: solo versione installata */ }
