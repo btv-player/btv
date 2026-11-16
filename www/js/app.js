@@ -3,7 +3,7 @@
   'use strict';
 
   // ---------------------------------------------------------------- Config
-  var APP_VERSION = '1.9.3'; // aumentala a ogni aggiornamento: in Impostazioni vedi quale versione sta girando
+  var APP_VERSION = '1.9.4'; // aumentala a ogni aggiornamento: in Impostazioni vedi quale versione sta girando
   var PRESETS = [];      // nessuna lista precaricata: solo quelle che aggiungi tu
   // Guide TV gratuite in formato XMLTV (si possono disattivare o aggiungerne altre nelle Impostazioni).
   var DEFAULT_EPG = [];  // nessuna guida precaricata: quella della playlist + quelle che aggiungi tu
@@ -619,6 +619,7 @@
     clearTimeout(pv.timer);
     if (pv.hls) { try { pv.hls.destroy(); } catch (e) { /* ignora */ } pv.hls = null; }
     var v = el.pvVideo;
+    v.onerror = null;
     try { v.pause(); } catch (e) { /* ignora */ }
     v.removeAttribute('src');
     try { v.load(); } catch (e) { /* ignora */ }
@@ -645,22 +646,56 @@
       noteWatching(ch.url);
       if (state.prevUrl !== before) renderQuick();
     }, 10000);
-    var v = el.pvVideo;
     el.pvPanel.classList.add('loading');
-    v.onplaying = function () { el.pvPanel.classList.remove('loading'); };
-    if (/\.m3u8?(\?|$)|\/hls\/|m3u8/i.test(ch.url) && hlsJsSupported()) {
+    el.pvVideo.onplaying = function () { el.pvPanel.classList.remove('loading'); };
+    // Come nel lettore: se un modo non funziona si prova l'altro (su Fire TV hls.js fallisce con i server
+    // senza CORS, mentre il lettore nativo li riproduce: prima l'anteprima restava vuota).
+    previewStart(ch.url, /\.m3u8?(\?|$)|\/hls\/|m3u8/i.test(ch.url) && hlsJsSupported(), false);
+  }
+
+  function previewStart(url, useHls, isRetry) {
+    var pv = state.pv, v = el.pvVideo;
+    function retry() {
+      if (pv.playingUrl !== url) return;
+      if (isRetry || (!useHls && !hlsJsSupported())) { previewStop(); return; }
+      if (pv.hls) { try { pv.hls.destroy(); } catch (e) { /* ignora */ } pv.hls = null; }
+      v.onerror = null;
+      try { v.pause(); } catch (e) { /* ignora */ }
+      v.removeAttribute('src');
+      try { v.load(); } catch (e) { /* ignora */ }
+      previewStart(url, !useHls, true);
+    }
+    if (useHls) {
       var Hls = window.Hls;
       var hls = new Hls({ capLevelToPlayerSize: true, startLevel: 0, maxBufferLength: 10, maxMaxBufferLength: 15,
         backBufferLength: 0, maxBufferSize: 15 * 1000 * 1000, manifestLoadingMaxRetry: 1, fragLoadingMaxRetry: 2 });
       pv.hls = hls;
-      hls.on(Hls.Events.ERROR, function (e, d) { if (d.fatal && pv.hls === hls) { previewStop(); } });
+      v.onerror = null;
+      hls.on(Hls.Events.ERROR, function (e, d) { if (d.fatal && pv.hls === hls) retry(); });
       hls.on(Hls.Events.MANIFEST_PARSED, function () { var p = v.play(); if (p && p.catch) p.catch(function () {}); });
-      hls.loadSource(ch.url);
+      hls.loadSource(url);
       hls.attachMedia(v);
     } else {
-      v.src = ch.url;
+      v.onerror = function () { if (!pv.hls) retry(); };
+      v.src = url;
       var p = v.play(); if (p && p.catch) p.catch(function () {});
     }
+  }
+
+  // Home ferma per 1 minuto (nessun tasto) con l'anteprima in riproduzione: il canale si apre a schermo intero.
+  // Evita che la TV oscuri la pagina lasciando visibile solo il riquadro del video (succedeva su LG).
+  var IDLE_FULL_MS = 60 * 1000, idleTimer = null;
+  function armIdle() {
+    clearTimeout(idleTimer);
+    idleTimer = setTimeout(idleFull, IDLE_FULL_MS);
+  }
+  function idleFull() {
+    var cur = Nav.current(), ae = document.activeElement;
+    var ready = !background && state.screen === 'browse' && !el.home.classList.contains('hidden') &&
+      state.pv.ch && state.pv.playingUrl === state.pv.ch.url && !el.pvPanel.classList.contains('loading') &&
+      el.pair.classList.contains('hidden') && cur && el.screens.browse.contains(cur) && !(ae && ae.tagName === 'INPUT');
+    if (ready) actions.previewFull();
+    else { clearTimeout(idleTimer); idleTimer = setTimeout(idleFull, 5000); }   // ricontrolla tra poco (nessun tasto premuto nel frattempo)
   }
 
   // Controllo aggiornamenti: legge un file statico pubblico (nessun dato inviato: niente cookie, niente referrer).
@@ -2749,6 +2784,16 @@
   }
 
   // ---------------------------------------------------------------- Eventi
+  // Ogni tasto (o clic/tocco) riazzera il minuto di attesa prima dello schermo intero automatico.
+  document.addEventListener('keydown', armIdle, true);
+  document.addEventListener('mousedown', armIdle, true);
+  document.addEventListener('touchstart', armIdle, true);
+  var lastPtr = '';
+  document.addEventListener('mousemove', function (e) {               // puntatore del telecomando LG (solo se si muove davvero)
+    var pos = e.screenX + ',' + e.screenY;
+    if (pos !== lastPtr) { lastPtr = pos; armIdle(); }
+  }, true);
+  armIdle();
   document.addEventListener('keydown', function (e) {
     var k = e.keyCode;
     var ae = document.activeElement;
