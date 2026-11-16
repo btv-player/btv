@@ -3,7 +3,7 @@
   'use strict';
 
   // ---------------------------------------------------------------- Config
-  var APP_VERSION = '1.9.6'; // aumentala a ogni aggiornamento: in Impostazioni vedi quale versione sta girando
+  var APP_VERSION = '1.9.7'; // aumentala a ogni aggiornamento: in Impostazioni vedi quale versione sta girando
   var PRESETS = [];      // nessuna lista precaricata: solo quelle che aggiungi tu
   // Guide TV gratuite in formato XMLTV (si possono disattivare o aggiungerne altre nelle Impostazioni).
   var DEFAULT_EPG = [];  // nessuna guida precaricata: quella della playlist + quelle che aggiungi tu
@@ -175,7 +175,9 @@
       state.multi.tiles.forEach(function (t, i) { if (t.ch) tileLoad(i, t.ch); });
     }
     keepScreenOn(state.screen === 'player' || state.screen === 'multi');
-    if (state.screen === 'browse') checkUpdate(false);                    // l'app resta aperta in sottofondo anche per giorni
+    // Fire TV tiene l'app aperta in sottofondo anche per giorni: al rientro si ricontrolla (se l'ultimo controllo
+    // ha più di 2 minuti), qualunque sia la schermata; il riquadro compare poi nella Home.
+    if (Date.now() - state.updLast > 2 * 60e3) checkUpdate(true);
   }
   document.addEventListener('visibilitychange', function () { setBackground(!!document.hidden); });
 
@@ -713,7 +715,7 @@
     var now = Date.now();
     if (!force && now - state.updLast < 60 * 60e3) { done(); return; }                    // al massimo una volta l'ora
     state.updLast = now;
-    fetch(VERSION_URL + '?v=' + Math.floor(now / 600000), { credentials: 'omit', cache: 'no-store', referrerPolicy: 'no-referrer' })
+    fetch(VERSION_URL + '?v=' + Math.floor(now / 60000), { credentials: 'omit', cache: 'no-store', referrerPolicy: 'no-referrer' })
       .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
       .then(function (v) {
         if (!v || typeof v.version !== 'string' || !/^\d+\.\d+\.\d+$/.test(v.version) || !newerVersion(v.version, APP_VERSION)) {
