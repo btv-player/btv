@@ -3,7 +3,7 @@
   'use strict';
 
   // ---------------------------------------------------------------- Config
-  var APP_VERSION = '1.9.4'; // aumentala a ogni aggiornamento: in Impostazioni vedi quale versione sta girando
+  var APP_VERSION = '1.9.5'; // aumentala a ogni aggiornamento: in Impostazioni vedi quale versione sta girando
   var PRESETS = [];      // nessuna lista precaricata: solo quelle che aggiungi tu
   // Guide TV gratuite in formato XMLTV (si possono disattivare o aggiungerne altre nelle Impostazioni).
   var DEFAULT_EPG = [];  // nessuna guida precaricata: quella della playlist + quelle che aggiungi tu
@@ -175,6 +175,7 @@
       state.multi.tiles.forEach(function (t, i) { if (t.ch) tileLoad(i, t.ch); });
     }
     keepScreenOn(state.screen === 'player' || state.screen === 'multi');
+    if (state.screen === 'browse') checkUpdate(false);                    // l'app resta aperta in sottofondo anche per giorni
   }
   document.addEventListener('visibilitychange', function () { setBackground(!!document.hidden); });
 
@@ -706,23 +707,25 @@
     return false;
   }
 
-  function checkUpdate(force) {
-    if (!state.updCheck || !window.fetch) return;
+  function checkUpdate(force, done) {
+    done = done || function () {};
+    if (!state.updCheck || !window.fetch) { done(); return; }
     var now = Date.now();
-    if (!force && now - state.updLast < 60 * 60e3) return;                    // al massimo una volta l'ora
+    if (!force && now - state.updLast < 60 * 60e3) { done(); return; }                    // al massimo una volta l'ora
     state.updLast = now;
     fetch(VERSION_URL + '?v=' + Math.floor(now / 600000), { credentials: 'omit', cache: 'no-store', referrerPolicy: 'no-referrer' })
       .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
       .then(function (v) {
         if (!v || typeof v.version !== 'string' || !/^\d+\.\d+\.\d+$/.test(v.version) || !newerVersion(v.version, APP_VERSION)) {
-          showUpdateBox(null); return;
+          showUpdateBox(null); done(); return;
         }
         var apk = v.apk && typeof v.apk.url === 'string' && v.apk.url.indexOf(UPDATE_PREFIX) === 0 &&
           /^[0-9a-f]{64}$/.test(v.apk.sha256 || '') ? { url: v.apk.url, sha256: v.apk.sha256 } : null;
         var web = v.web && typeof v.web.url === 'string' && v.web.url.indexOf(WEB_PREFIX) === 0 && /^[\w.-]+\.json$/.test(v.web.url.slice(WEB_PREFIX.length)) &&
           /^[A-Za-z0-9+\/]{86}==$/.test(v.web.sig || '') ? { url: v.web.url, sig: v.web.sig } : null;
         showUpdateBox({ version: v.version, apk: apk, web: web });
-      }, function () { /* niente rete o file assente: si riprova più tardi */ });
+        done();
+      }, function () { done(); /* niente rete o file assente: si riprova più tardi */ });
   }
 
   // Riquadro in basso a sinistra: al posto di "BTV Player" compare "È disponibile un aggiornamento".
@@ -2625,7 +2628,7 @@
       selectGroup(b.getAttribute('data-group'));
       Nav.focus(firstMainItem() || activeGroupEl());
     },
-    installUpdate: function () { installUpdate(); },
+    installUpdate: function () { checkUpdate(true, installUpdate); },   // prima rilegge l'ultima versione: il riquadro può essere vecchio
     resetTvUpdate: function () {
       Store.remove('webBundle');
       toast('Torno alla versione installata: riavvio BTV…', 3000);
