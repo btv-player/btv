@@ -249,14 +249,17 @@ powershell -ExecutionPolicy Bypass -File .\tools\install-lg.ps1 192.168.1.60
 www/                 app web (HTML/CSS/JS, nessun build step)
   js/m3u.js          parser playlist M3U
   js/epg.js          parser guida XMLTV e abbinamento ai canali
-  js/epg-worker.js   analisi della guida in background (Web Worker)
+  js/epg-worker.js   analisi della guida a pezzi, in background (Web Worker)
+  js/store.js        impostazioni (localStorage) e copie di playlist e guida (IndexedDB)
   js/nav.js          navigazione col telecomando
+  js/vlist.js        liste lunghe "a finestra" (nel DOM solo le righe vicine a quelle visibili)
   js/app.js          logica: elenco, lettore, guida, impostazioni
   vendor/            hls.js e pako (gzip), copiati da node_modules all'installazione
 platforms/tizen/     config.xml per Samsung
 platforms/webos/     appinfo.json per LG
 android/             progetto Android Studio (generato da Capacitor)
 tools/               script: server di sviluppo, icone, build TV, patch Android
+test/                test dei parser M3U e guida (npm test)
 assets/              icone e banner generati (npm run icons)
 ```
 

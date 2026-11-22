@@ -59,6 +59,14 @@ try {
   if ($LASTEXITCODE -ne 0) { throw "cap sync non riuscito" }
   node tools/patch-android.js
   if ($LASTEXITCODE -ne 0) { throw "patch-android non riuscito" }
+  if ($Debug) {
+    # Solo nell'APK di prova: debug della WebView acceso, per misurare con chrome://inspect dal PC
+    # (memoria, tempi, fotogrammi). Non va mai pubblicato.
+    $cfg = Join-Path $root "android\app\src\main\assets\capacitor.config.json"
+    $j = Get-Content $cfg -Raw | ConvertFrom-Json
+    $j.android.webContentsDebuggingEnabled = $true
+    [IO.File]::WriteAllText($cfg, ($j | ConvertTo-Json -Depth 10))
+  }
 
   Write-Host "Compilo l'APK (la prima volta Gradle scarica ~300 MB e ci mette qualche minuto)..." -ForegroundColor Cyan
   Push-Location android
@@ -69,12 +77,14 @@ try {
 
   New-Item -ItemType Directory -Force dist | Out-Null
   $out = if ($Debug) { "android\app\build\outputs\apk\debug\app-debug.apk" } else { "android\app\build\outputs\apk\release\app-release.apk" }
-  Copy-Item $out dist\BTV.apk -Force
-  (Get-FileHash dist\BTV.apk -Algorithm SHA256).Hash.ToLower() | Set-Content -Encoding ascii dist\BTV.apk.sha256
-  $mb = [math]::Round((Get-Item dist\BTV.apk).Length / 1MB, 1)
-  $kind = if ($Debug) { "di prova" } else { "definitivo firmato" }
+  # L'APK di prova ha un nome suo: non sostituisce mai quello da pubblicare.
+  $dst = if ($Debug) { "dist\BTV-debug.apk" } else { "dist\BTV.apk" }
+  Copy-Item $out $dst -Force
+  if (-not $Debug) { (Get-FileHash dist\BTV.apk -Algorithm SHA256).Hash.ToLower() | Set-Content -Encoding ascii dist\BTV.apk.sha256 }
+  $mb = [math]::Round((Get-Item $dst).Length / 1MB, 1)
+  $kind = if ($Debug) { "di prova, con debug della WebView: non pubblicarlo" } else { "definitivo firmato" }
   Write-Host ""
-  Write-Host "APK pronto: dist\BTV.apk ($mb MB, $kind)" -ForegroundColor Green
+  Write-Host "APK pronto: $dst ($mb MB, $kind)" -ForegroundColor Green
 } finally {
   Remove-Item Env:BTV_PW, Env:ORG_GRADLE_PROJECT_BTV_STORE_PASSWORD, Env:ORG_GRADLE_PROJECT_BTV_STORE_FILE -ErrorAction SilentlyContinue
   Pop-Location

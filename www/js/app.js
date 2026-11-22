@@ -10,10 +10,10 @@
   var EPG_MAX_AGE = 6 * 3600e3; // ogni quanto riscaricare la guida
   // TV e Fire TV hanno poca memoria: lì si usano valori più leggeri (sul PC restano quelli pieni).
   var LOW_POWER = detectPlatform() !== 'web';
-  var PAGE = LOW_POWER ? 60 : 120;                 // card renderizzate per volta
   var STREAM_TIMEOUT = 25000;  // ms prima di dichiarare un canale non disponibile
   var OSD_TIME = 5000;
-  var TIMESHIFT_SECONDS = LOW_POWER ? 300 : 600;   // "torna indietro"/pausa: 5 min su TV, 10 su PC
+  // "torna indietro"/pausa: 3 min su TV e Fire TV (5 min in FHD occupavano 150-250 MB, troppo con 1 GB), 10 sul PC
+  var TIMESHIFT_SECONDS = LOW_POWER ? 180 : 600;
   var BUFFER_BYTES = (LOW_POWER ? 60 : 150) * 1000 * 1000;
   var LIVE_AHEAD = 30;                             // secondi scaricati in anticipo mentre si guarda
   var DEAD_TTL = 12 * 3600e3;  // un canale che non va resta segnato per 12 ore (poi si riprova)
@@ -55,7 +55,7 @@
   }
   var state = {
     channels: [], groups: [], group: '__home', query: '', pv: { ch: null, hls: null, timer: null },
-    filtered: [], rendered: 0,
+    filtered: [],
     favorites: Store.get('favorites', {}),
     playlists: loadPlaylists(),
     activeId: Store.get('activePlaylist', ''),
@@ -103,6 +103,13 @@
     toast: $('toast'), pair: $('pair'), home: $('home'), pvPanel: $('h-preview'), pvVideo: $('pv-video'), hgList: $('hg-list'),
     clock: $('clock'), updBtn: $('btn-update'), optUpd: $('opt-update')
   };
+
+  // Elenchi lunghi "a finestra" (vlist.js): nel DOM solo le righe vicine a quelle visibili.
+  var gridV = new VList(el.grid, { count: function () { return state.filtered.length; },
+    make: function (i) { return makeCard(state.filtered[i], i); }, cols: 'auto', buffer: 3 });
+  var hgV = new VList(el.hgList, { count: function () { return (state.hgAll || []).length; }, make: makeGuideRow, buffer: 5 });
+  var pickV = new VList(el.pickerList, { count: function () { return state.picker ? state.picker.list.length : 0; },
+    make: function (i) { return makePickerRow(i); }, buffer: 6 });
 
   // ---------------------------------------------------------------- Piattaforma
   function detectPlatform() {
@@ -193,6 +200,11 @@
     if (Date.now() - state.updLast > 2 * 60e3) checkUpdate(true);
   }
   document.addEventListener('visibilitychange', function () { setBackground(!!document.hidden); });
+  // LG: BTV riaperta dalla barra delle app mentre era già in esecuzione.
+  document.addEventListener('webOSRelaunch', function () {
+    setBackground(false);
+    if (Date.now() - state.updLast > 2 * 60e3) checkUpdate(true);
+  });
 
   // ---------------------------------------------------------------- Utilità
   // Icona + testo su un elemento; non riscrive il DOM se non è cambiato niente (alcune chiamate sono ogni secondo).
@@ -222,8 +234,8 @@
     if (!url || !!state.dead[url] === isDead) return;
     if (isDead) state.dead[url] = Date.now(); else delete state.dead[url];
     Store.set('dead', state.dead);
-    Array.prototype.forEach.call(el.grid.children, function (card) {
-      var c = state.filtered[+card.getAttribute('data-idx')];
+    gridV.forEach(function (card, i) {
+      var c = state.filtered[i];
       if (c && c.url === url) card.classList.toggle('dead', isDead);
     });
   }
@@ -280,6 +292,7 @@
       var img = new Image();
       img.alt = '';
       img.setAttribute('loading', 'lazy');
+      img.decoding = 'async';                       // decodifica fuori dal disegno della pagina
       img.onerror = function () { if (img.parentNode) img.parentNode.removeChild(img); box.appendChild(initials(ch.name)); };
       img.src = ch.logo;
       box.appendChild(img);
@@ -440,7 +453,7 @@
     if (state.activeId !== pl.id) { state.activeId = pl.id; Store.set('activePlaylist', pl.id); }
     el.plName.textContent = pl.name;
     setStatus('Caricamento di “' + pl.name + '”…');
-    state.channels = []; state.filtered = []; el.grid.innerHTML = '';
+    state.channels = []; state.filtered = []; gridV.clear();
     var t0 = Date.now(), cached = null;
     Cache.get('cache:' + pl.id).then(function (c) {
       if (token !== state.loadToken) return;
@@ -478,7 +491,7 @@
     el.plName.textContent = '';
     setStatus('');
     renderGroups();
-    el.grid.innerHTML = '';
+    gridV.clear();
     var w = document.createElement('div');
     w.className = 'welcome';
     w.innerHTML = '<div class="wl-title">Benvenuto in BTV</div>' +
@@ -535,7 +548,7 @@
   }
 
   function showHome() {
-    el.grid.innerHTML = '';
+    gridV.clear();
     el.grid.classList.add('hidden');
     el.status.classList.add('hidden');
     $('grid-tools').classList.add('hidden');                              // "Riordina" solo nella cartella Preferiti
@@ -556,49 +569,37 @@
     // Guida: tutti i canali in ordine di numero, dall'1 in poi. Si ricostruisce solo se cambia la playlist,
     // e le righe si creano a blocchi (le TV caricano subito tutti i loghi: con 260 righe insieme andava a scatti).
     var key = state.activeId + ':' + state.channels.length;
-    if (state.hgKey !== key || !el.hgList.children.length) {
+    if (state.hgKey !== key || !hgV.attached) {
       state.hgKey = key;
       state.hgAll = state.channels.slice().sort(function (a, b) { return a.num - b.num; });
-      el.hgList.innerHTML = '';
-      el.hgList.scrollTop = 0;
-      renderGuideRows(HG_PAGE);
+      hgV.reset();
     } else {
-      Array.prototype.forEach.call(el.hgList.children, function (r) {
-        var ch = channelByUrl(r.getAttribute('data-url'));
-        if (ch) fillGuideRow(r, ch, now);
-      });
+      hgV.forEach(function (r, i) { fillGuideRow(r, state.hgAll[i], now); });
     }
     updateClock();
     renderHomeTiles(favs, now);
   }
 
-  var HG_PAGE = 40;
-  // Aggiunge alla guida della Home le prossime "count" righe.
-  function renderGuideRows(count) {
-    var list = state.hgAll || [], start = el.hgList.children.length, now = Date.now();
-    var end = Math.min(list.length, start + count);
-    if (start >= end) return;
-    var frag = document.createDocumentFragment();
-    list.slice(start, end).forEach(function (ch) {
-      var r = document.createElement('div');
-      r.className = 'hg-row focusable';
-      r.setAttribute('data-action', 'homePlay');
-      r.setAttribute('data-url', ch.url);
-      var c = document.createElement('div'); c.className = 'hg-ch';
-      var lg = document.createElement('div'); lg.className = 'hg-logo'; fillLogo(lg, ch);
-      var nm = document.createElement('span'); nm.className = 'hg-num'; nm.textContent = ch.num;
-      c.appendChild(lg); c.appendChild(nm);
-      var pr = document.createElement('div'); pr.className = 'hg-prog';
-      var l1 = document.createElement('div'); l1.className = 'hg-l1';
-      var t = document.createElement('span'); t.className = 'hg-time';
-      var p = document.createElement('span'); p.className = 'hg-title';
-      var nx = document.createElement('div'); nx.className = 'hg-next';
-      l1.appendChild(t); l1.appendChild(p); pr.appendChild(l1); pr.appendChild(nx);
-      r.appendChild(c); r.appendChild(pr);
-      fillGuideRow(r, ch, now);
-      frag.appendChild(r);
-    });
-    el.hgList.appendChild(frag);
+  // Una riga della guida della Home (la lista è "a finestra": vedi vlist.js).
+  function makeGuideRow(i) {
+    var ch = state.hgAll[i], now = Date.now();
+    var r = document.createElement('div');
+    r.className = 'hg-row focusable';
+    r.setAttribute('data-action', 'homePlay');
+    r.setAttribute('data-url', ch.url);
+    var c = document.createElement('div'); c.className = 'hg-ch';
+    var lg = document.createElement('div'); lg.className = 'hg-logo'; fillLogo(lg, ch);
+    var nm = document.createElement('span'); nm.className = 'hg-num'; nm.textContent = ch.num;
+    c.appendChild(lg); c.appendChild(nm);
+    var pr = document.createElement('div'); pr.className = 'hg-prog';
+    var l1 = document.createElement('div'); l1.className = 'hg-l1';
+    var t = document.createElement('span'); t.className = 'hg-time';
+    var p = document.createElement('span'); p.className = 'hg-title';
+    var nx = document.createElement('div'); nx.className = 'hg-next';
+    l1.appendChild(t); l1.appendChild(p); pr.appendChild(l1); pr.appendChild(nx);
+    r.appendChild(c); r.appendChild(pr);
+    fillGuideRow(r, ch, now);
+    return r;
   }
 
   function renderHomeTiles(favs, now) {
@@ -695,10 +696,7 @@
   function refreshHome() {
     if (el.home.classList.contains('hidden')) return;
     var now = Date.now();
-    Array.prototype.forEach.call(el.hgList.children, function (r) {
-      var ch = channelByUrl(r.getAttribute('data-url'));
-      if (ch) fillGuideRow(r, ch, now);
-    });
+    hgV.forEach(function (r, i) { if (state.hgAll[i]) fillGuideRow(r, state.hgAll[i], now); });
     Array.prototype.forEach.call(el.home.querySelectorAll('.tile-now'), function (n) {
       var t = n.parentNode.getAttribute('data-url') ? n.parentNode : n.parentNode.parentNode;   // .qt-now sta dentro .qt-text
       var ch = channelByUrl(t.getAttribute('data-url'));
@@ -722,7 +720,8 @@
     var ch = state.pv.ch, p = el.pvPanel;
     p.classList.toggle('empty', !ch);
     if (!ch) return;
-    fillLogo(p.querySelector('.pv-logo'), ch);
+    var lg = p.querySelector('.pv-logo');
+    if (lg._url !== ch.url) { lg._url = ch.url; fillLogo(lg, ch); }       // prima si ricreava ogni 30 secondi
     p.querySelector('.pv-name').textContent = ch.num + '  ' + ch.title;
     var nn = EPG.nowNext(ch.epg, Date.now());
     p.querySelector('.pv-now').textContent = nn.now ? hhmm(nn.now[0]) + ' – ' + hhmm(nn.now[1]) + '   ' + nn.now[2] : '';
@@ -757,7 +756,7 @@
     var pv = state.pv;
     pv.ch = ch;
     fillPreviewInfo();
-    Array.prototype.forEach.call(el.hgList.children, function (r) { r.classList.toggle('playing', r.getAttribute('data-url') === ch.url); });
+    hgV.forEach(function (r) { r.classList.toggle('playing', r.getAttribute('data-url') === ch.url); });
     if (background || state.screen !== 'browse' || el.home.classList.contains('hidden')) return;
     if (pv.playingUrl === ch.url) return;
     previewStop();
@@ -995,7 +994,7 @@
     applyFilter();
     if (state.screen === 'browse') {
       var c = Nav.current();
-      if (!c || !document.body.contains(c)) Nav.setRoot(el.screens.browse, el.grid.children[0] || activeGroupEl());
+      if (!c || !document.body.contains(c)) Nav.setRoot(el.screens.browse, gridV.ensure(0) || activeGroupEl());
     }
     if (list.length) loadEpg(false);
     // All'avvio l'ultimo canale visto riparte nell'anteprima della Home (senza audio): lo schermo intero
@@ -1205,16 +1204,16 @@
   }
 
   // Aggiorna card visibili, barra info e pannello guida (chiamata ogni minuto e dopo il caricamento).
-  function refreshEpgViews() {
+  // fromTimer: chiamata del minuto (la Home ha già il suo aggiornamento ogni 30 s; la griglia solo se è visibile).
+  function refreshEpgViews(fromTimer) {
     var now = Date.now();
-    Array.prototype.forEach.call(el.grid.children, function (card) {
-      var ch = state.filtered[+card.getAttribute('data-idx')];
-      if (ch) fillCardEpg(card, ch, now);
-    });
+    if (fromTimer !== true || state.screen === 'browse') {
+      gridV.forEach(function (card, i) { if (state.filtered[i]) fillCardEpg(card, state.filtered[i], now); });
+    }
     if (state.screen === 'player' && osdVisible()) fillOsdEpg();
     if (state.guide) renderGuide(false);
     if (state.multi) state.multi.tiles.forEach(function (t) { if (t.ch) fillTileEpg(t); });
-    refreshHome();
+    if (fromTimer !== true) refreshHome();
     updateEpgLabel();
   }
 
@@ -1251,7 +1250,8 @@
     el.grid.classList.add('reordering');
     setIc($('btn-reorder'), 'check', 'Fine riordino');
     $('reorder-hint').textContent = 'OK prende un canale · frecce lo spostano · OK lo lascia · Indietro per finire';
-    if (el.grid.children[0]) Nav.focus(el.grid.children[0]);
+    var c0 = gridV.ensure(0);
+    if (c0) Nav.focus(c0);
   }
 
   function stopReorder() {
@@ -1271,10 +1271,8 @@
     // i preferiti nascosti (es. canali non funzionanti) restano in fondo
     var shown = list.map(function (c) { return c.url; });
     saveFavOrder(shown.concat(favChannels().map(function (c) { return c.url; }).filter(function (u) { return shown.indexOf(u) < 0; })));
-    el.grid.innerHTML = '';
-    state.rendered = 0;
-    while (state.rendered <= to && state.rendered < list.length) renderMore();
-    var card = el.grid.children[to];
+    gridV.refresh();
+    var card = gridV.ensure(to);
     card.classList.add('moving');
     Nav.focus(card);
     return to;
@@ -1291,7 +1289,7 @@
       return true;
     }
     if (r.moving < 0) return false;                                       // nessun canale preso: frecce normali
-    var cols = gridCols();
+    var cols = gridV.cols();
     var to = a === 'left' ? i - 1 : a === 'right' ? i + 1 : a === 'up' ? i - cols : a === 'down' ? i + cols : -1;
     if (to < 0) return a === 'left' || a === 'right' || a === 'up' || a === 'down';
     r.moving = moveFav(i, Math.min(to, state.filtered.length - 1));
@@ -1343,10 +1341,7 @@
       if (state.hideDead && state.dead[ch.url]) return false;
       return !q || ch.name.toLowerCase().indexOf(q) >= 0;
     });
-    el.grid.innerHTML = '';
-    el.grid.scrollTop = 0;
-    state.rendered = 0;
-    renderMore();
+    gridV.reset();
     var canReorder = g === '__fav' && !q && state.filtered.length > 1;
     $('grid-tools').classList.toggle('hidden', !canReorder);
     if (!canReorder && state.reorder) stopReorder();
@@ -1356,14 +1351,6 @@
     } else {
       setStatus(state.filtered.length + (state.filtered.length === 1 ? ' canale' : ' canali') + (q ? ' per “' + state.query + '”' : ''));
     }
-  }
-
-  function renderMore() {
-    var end = Math.min(state.filtered.length, state.rendered + PAGE);
-    var frag = document.createDocumentFragment();
-    for (var i = state.rendered; i < end; i++) frag.appendChild(makeCard(state.filtered[i], i));
-    el.grid.appendChild(frag);
-    state.rendered = end;
   }
 
   function makeCard(ch, i) {
@@ -1382,31 +1369,29 @@
     return d;
   }
 
-  function gridCols() {
-    var c = el.grid.children;
-    if (c.length < 2) return 1;
-    var top = c[0].offsetTop;
-    for (var i = 1; i < c.length; i++) if (c[i].offsetTop !== top) return i;
-    return c.length;
-  }
-
   // Regole di navigazione specifiche dell'elenco (più veloci e prevedibili della geometria).
   function customNav(from, dir) {
     if (state.screen === 'browse') {
       if (from.classList.contains('card')) {
         var i = +from.getAttribute('data-idx');
-        var cols = gridCols();
+        var cols = gridV.cols(), n = state.filtered.length;
         var col = i % cols;
-        if ((dir === 'down') && i + cols * 3 >= state.rendered && state.rendered < state.filtered.length) renderMore();
-        var cards = el.grid.children;
-        if (dir === 'right') return (col < cols - 1 && cards[i + 1]) ? cards[i + 1] : false;
-        if (dir === 'left') return col > 0 ? cards[i - 1] : activeGroupEl();
+        if (dir === 'right') return (col < cols - 1 && i + 1 < n) ? gridV.ensure(i + 1) : false;
+        if (dir === 'left') return col > 0 ? gridV.ensure(i - 1) : activeGroupEl();
         if (dir === 'down') {
-          if (cards[i + cols]) return cards[i + cols];
-          if (Math.floor((cards.length - 1) / cols) > Math.floor(i / cols)) return cards[cards.length - 1];
+          if (i + cols < n) return gridV.ensure(i + cols);
+          if (Math.floor((n - 1) / cols) > Math.floor(i / cols)) return gridV.ensure(n - 1);
           return false;
         }
-        if (dir === 'up') return i - cols >= 0 ? cards[i - cols] : ($('grid-tools').classList.contains('hidden') ? el.search : $('btn-reorder'));
+        if (dir === 'up') return i - cols >= 0 ? gridV.ensure(i - cols) : ($('grid-tools').classList.contains('hidden') ? el.search : $('btn-reorder'));
+      }
+      // Guida della Home: su/giù vanno alla riga accanto per indice (prima Nav misurava la posizione di tutti gli
+      // elementi a ogni pressione: più righe caricate, più lento). Sinistra/destra restano geometriche.
+      if (from.classList.contains('hg-row')) {
+        var hi = hgV.index(from), hn = (state.hgAll || []).length;
+        if (dir === 'down') return hi >= 0 && hi + 1 < hn ? hgV.ensure(hi + 1) : false;
+        if (dir === 'up' && hi > 0) return hgV.ensure(hi - 1);
+        return null;
       }
       if (from.classList.contains('group')) {
         if (dir === 'right') {
@@ -1442,7 +1427,6 @@
     var c = Nav.current();
     clearTimeout(state.timers.group);
     clearTimeout(state.pv.timer);
-    if (c && c.classList.contains('hg-row') && !c.nextSibling) renderGuideRows(HG_PAGE);
     // Muoversi nella guida NON cambia canale: si cambia solo con OK.
     if (c && c.classList.contains('group')) {
       state.timers.group = setTimeout(function () { selectGroup(c.getAttribute('data-group')); }, 280);
@@ -1463,8 +1447,8 @@
     if (!saved) toast('Memoria piena: preferiti non salvati. Elimina una playlist che non usi.', 5000);
     else toast(isFav ? 'Aggiunto ai preferiti: ' + ch.title : 'Rimosso dai preferiti: ' + ch.title);
     // aggiorna card e contatore senza ridisegnare tutto
-    Array.prototype.forEach.call(el.grid.children, function (card) {
-      var c = state.filtered[+card.getAttribute('data-idx')];
+    gridV.forEach(function (card, i) {
+      var c = state.filtered[i];
       if (c && c.url === ch.url) card.classList.toggle('fav', isFav);
     });
     var favGroup = el.groups.querySelector('[data-group="__fav"] .gcount');
@@ -1557,10 +1541,7 @@
   function focusCardFor(ch) {
     if (!ch) return null;
     for (var i = 0; i < state.filtered.length; i++) {
-      if (state.filtered[i].url === ch.url) {
-        while (state.rendered <= i) renderMore();
-        return el.grid.children[i];
-      }
+      if (state.filtered[i].url === ch.url) return gridV.ensure(i);
     }
     return null;
   }
@@ -2680,40 +2661,28 @@
   function openPicker(onPick, fixedList, selIdx, title) {
     var favs = fixedList ? [] : favChannels();
     var rest = fixedList || state.channels.filter(function (c) { return !state.favorites[c.url]; });
-    var list = favs.concat(rest).slice(0, 3000);
-    state.picker = { list: list, sel: 0, onPick: onPick, favCount: favs.length, rendered: 0 };
+    // Tutti i canali (prima al massimo 3000: con playlist grandi gli altri non si raggiungevano); la lista è
+    // "a finestra", quindi aprirla sul canale 2500 non crea più 2500 righe in un colpo.
+    var list = favs.concat(rest);
+    state.picker = { list: list, sel: 0, onPick: onPick, favCount: favs.length };
     el.picker.querySelector('.guide-ch').textContent = title || 'Scegli un canale';
-    el.pickerList.innerHTML = '';
-    var start = selIdx > 0 && selIdx < list.length ? selIdx : 0;
-    pickerRender(start + 60);
     el.picker.classList.remove('hidden');
-    pickerSelect(start);
+    pickV.reset();
+    pickerSelect(selIdx > 0 && selIdx < list.length ? selIdx : 0);
   }
 
-  // Righe della lista canali create man mano (prima 120, poi a blocchi): con playlist grandi sulle TV
-  // creare migliaia di righe insieme bloccava l'apertura della lista.
-  function pickerRender(upTo) {
-    var p = state.picker;
-    if (!p) return;
-    var end = Math.min(p.list.length, Math.max(upTo, p.rendered + 120));
-    if (end <= p.rendered) return;
-    var frag = document.createDocumentFragment(), now = Date.now();
-    for (var i = p.rendered; i < end; i++) {
-      var ch = p.list[i];
-      if (i === 0 && p.favCount) frag.appendChild(pickerHeader('Preferiti', 'starf'));
-      if (i === p.favCount && p.favCount) frag.appendChild(pickerHeader('Tutti i canali'));
-      var r = document.createElement('div');
-      r.className = 'pk-row' + (state.dead[ch.url] ? ' dead' : '');
-      r.setAttribute('data-i', i);
-      var num = document.createElement('span'); num.className = 'pk-num'; num.textContent = ch.num;
-      var nm = document.createElement('span'); nm.className = 'pk-name'; nm.textContent = ch.title;
-      var nn = EPG.nowNext(ch.epg, now);
-      var nw = document.createElement('span'); nw.className = 'pk-now'; nw.textContent = nn.now ? nn.now[2] : '';
-      r.appendChild(num); r.appendChild(nm); r.appendChild(nw);
-      frag.appendChild(r);
-    }
-    el.pickerList.appendChild(frag);
-    p.rendered = end;
+  // Una riga della lista canali (i preferiti, in cima, hanno la stella).
+  function makePickerRow(i) {
+    var p = state.picker, ch = p.list[i];
+    var r = document.createElement('div');
+    r.className = 'pk-row' + (state.dead[ch.url] ? ' dead' : '') + (i === p.sel ? ' sel' : '');
+    r.setAttribute('data-i', i);
+    var num = document.createElement('span'); num.className = 'pk-num'; num.textContent = ch.num;
+    var nm = document.createElement('span'); nm.className = 'pk-name'; nm.textContent = (i < p.favCount ? '★ ' : '') + ch.title;
+    var nn = EPG.nowNext(ch.epg, Date.now());
+    var nw = document.createElement('span'); nw.className = 'pk-now'; nw.textContent = nn.now ? nn.now[2] : '';
+    r.appendChild(num); r.appendChild(nm); r.appendChild(nw);
+    return r;
   }
 
   // Lista canali sopra il video: scegli senza uscire da quello che stai guardando.
@@ -2739,23 +2708,16 @@
     playIndex(i);
   }
 
-  function pickerHeader(txt, icon) {
-    var h = document.createElement('div'); h.className = 'guide-day';
-    if (icon) setIc(h, icon, txt); else h.textContent = txt;
-    return h;
-  }
-
   function pickerSelect(i) {
     var p = state.picker;
     var prev = el.pickerList.querySelector('.pk-row.sel');
     if (prev) prev.classList.remove('sel');
     p.sel = Math.max(0, Math.min(i, p.list.length - 1));
-    if (p.sel + 30 >= p.rendered) pickerRender(p.sel + 120);             // crea le righe prima di arrivarci
-    var row = el.pickerList.querySelector('.pk-row[data-i="' + p.sel + '"]');
+    var row = pickV.ensure(p.sel);
     if (row) { row.classList.add('sel'); if (row.scrollIntoViewIfNeeded) row.scrollIntoViewIfNeeded(false); else row.scrollIntoView({ block: 'nearest' }); }
   }
 
-  function closePicker() { state.picker = null; el.picker.classList.add('hidden'); }
+  function closePicker() { pickV.clear(); state.picker = null; el.picker.classList.add('hidden'); }
 
   function pickerAction(a) {
     var p = state.picker;
@@ -2787,6 +2749,23 @@
     },
     openSettings: openSettings,
     closeSettings: closeSettings,
+    showDiag: function () {
+      var box = $('diag');
+      if (!box.classList.contains('hidden')) { box.classList.add('hidden'); return; }
+      var lines = ['BTV ' + APP_VERSION + ' · ' + platform + ' · aperta da ' + Math.round((Date.now() - Diag.start) / 60000) + ' min'];
+      var mem = window.performance && performance.memory;
+      if (mem) lines.push('Memoria JavaScript: ' + Math.round(mem.usedJSHeapSize / 1048576) + ' MB (limite ' + Math.round(mem.jsHeapSizeLimit / 1048576) + ' MB)');
+      lines.push('Elementi nella pagina: ' + document.getElementsByTagName('*').length + ' · canali: ' + state.channels.length +
+        ' · con guida: ' + state.epgCount + ' · metodo per server ricordato: ' + Object.keys(streamModes).length);
+      lines.push('');
+      Diag.items.slice().reverse().forEach(function (d) {
+        var t = new Date(d.at);
+        lines.push(pad(t.getHours()) + ':' + pad(t.getMinutes()) + ':' + pad(t.getSeconds()) + '  ' + d.label + ': ' + d.ms + ' ms');
+      });
+      if (!Diag.items.length) lines.push('Nessuna misura ancora.');
+      box.textContent = lines.join('\n');
+      box.classList.remove('hidden');
+    },
     closePlayer: function () { closePlayer(); },
     prevChannel: function () { prevChannel(); showOsd(true); },
     openChannelList: function () { openChannelList(); },
@@ -3020,9 +2999,14 @@
     if (pos !== lastPtr) { lastPtr = pos; armIdle(); }
   }, true);
   armIdle();
+  var lastKeyAt = 0;
   document.addEventListener('keydown', function (e) {
     var k = e.keyCode;
     var ae = document.activeElement;
+    // Tasto tenuto premuto: le ripetizioni troppo ravvicinate si saltano (le TV lente accumulavano ritardo).
+    var t = Date.now();
+    if (e.repeat && t - lastKeyAt < 70) { e.preventDefault(); return; }
+    lastKeyAt = t;
     if (ae && ae.tagName === 'INPUT') {
       // Modalità scrittura: OK/Fine/Indietro/▲▼ chiudono la tastiera.
       if (k === 13 || k === 65376 || k === 65385 || k === 10009 || k === 461 || k === 27 || k === 38 || k === 40) {
@@ -3085,15 +3069,6 @@
     Nav.focus(t);
     activate(t);
   });
-  el.pickerList.addEventListener('scroll', function () {
-    if (state.picker && el.pickerList.scrollTop + el.pickerList.clientHeight > el.pickerList.scrollHeight - 600) pickerRender(state.picker.rendered + 120);
-  });
-  el.hgList.addEventListener('scroll', function () {
-    if (el.hgList.scrollTop + el.hgList.clientHeight > el.hgList.scrollHeight - 400) renderGuideRows(HG_PAGE);
-  });
-  el.grid.addEventListener('scroll', function () {
-    if (el.grid.scrollTop + el.grid.clientHeight > el.grid.scrollHeight - 600 && state.rendered < state.filtered.length) renderMore();
-  });
   // In pausa la diretta continua a scaricarsi (fino al limite del timeshift) per riprendere senza buchi;
   // mentre guardi basta un piccolo anticipo: meno rete e meno lavoro per la TV.
   el.video.addEventListener('pause', function () { if (state.hls) state.hls.config.maxBufferLength = TIMESHIFT_SECONDS; });
@@ -3111,7 +3086,7 @@
   document.body.classList.add('platform-' + platform);
   if (LOW_POWER) document.body.classList.add('low-power');            // TV e Fire TV: niente effetti pesanti
   window.BTV = { state: state };                                     // utile per il debug dalla console
-  setInterval(refreshEpgViews, 60000);
+  setInterval(function () { refreshEpgViews(true); }, 60000);
   setInterval(function () { updateClock(); refreshHome(); }, 30000);                                    // "in onda" aggiornato ogni minuto
   setInterval(function () {
     if (state.screen === 'player' && state.playing && !el.video.paused && ++state.watchTick >= 30) { state.watchTick = 0; addWatch(state.playing.url, 30); }

@@ -173,8 +173,10 @@
         <button class="btn focusable" id="opt-update" data-action="toggleUpdCheck">Controllo aggiornamenti: attivo</button>
         <button class="btn focusable" data-action="clearDead"><i data-ic="refresh"></i>Riprova tutti i canali</button>
         <button class="btn focusable hidden" id="opt-reset-upd" data-action="resetTvUpdate"><i data-ic="previous"></i>Torna alla versione installata</button>
+        <button class="btn focusable" data-action="showDiag"><i data-ic="doc"></i>Diagnostica</button>
         <button class="btn focusable" data-action="closeSettings"><i data-ic="back"></i>Torna ai canali</button>
       </div>
+      <pre class="diag hidden" id="diag"></pre>
 
       <p class="note">
         BTV è solo un lettore: non fornisce, non ospita e non consiglia alcun contenuto.
@@ -259,6 +261,7 @@
 <script src="js/m3u.js"></script>
 <script src="js/epg.js"></script>
 <script src="js/nav.js"></script>
+<script src="js/vlist.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>
