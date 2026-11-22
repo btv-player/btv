@@ -41,13 +41,26 @@ var EPG = (function () {
     return t;
   }
 
+  // Espressioni compilate una volta sola (prima se ne creava una nuova per ogni tag di ogni programma).
+  var RE_TAG = {
+    title: /<title\b[^>]*>([\s\S]*?)<\/title>/,
+    desc: /<desc\b[^>]*>([\s\S]*?)<\/desc>/,
+    category: /<category\b[^>]*>([\s\S]*?)<\/category>/
+  };
+  var RE_ATTR = {
+    id: /\bid="([^"]*)"/,
+    start: /\bstart="([^"]*)"/,
+    stop: /\bstop="([^"]*)"/,
+    channel: /\bchannel="([^"]*)"/
+  };
+
   function tag(body, name) {
-    var m = new RegExp('<' + name + '\\b[^>]*>([\\s\\S]*?)</' + name + '>').exec(body);
+    var m = RE_TAG[name].exec(body);
     return m ? decode(stripCdata(m[1])) : '';
   }
 
   function attr(head, name) {
-    var m = new RegExp('\\b' + name + '="([^"]*)"').exec(head);
+    var m = RE_ATTR[name].exec(head);
     return m ? decode(m[1]) : '';
   }
 
@@ -74,56 +87,97 @@ var EPG = (function () {
     return String(s || '').match(/[0-9a-f]{24}/g) || [];
   }
 
+  // Analisi a pezzi: il testo arriva un blocco alla volta (mentre si decomprime) e si tengono in memoria solo
+  // i programmi utili, mai l'intero file. push(testo) più volte, poi finish().
   // Ritorna { channels: {id: {names:[], icon}}, progs: {id: [[start, stop, title, desc, category], ...]} }
-  function parse(xml, now) {
+  var RE_NAME = /<display-name\b[^>]*>([^<]*(?:<(?!\/display-name>)[^<]*)*)<\/display-name>/g;
+  var RE_ICON = /<icon\b[^>]*src="([^"]*)"/;
+  var KEEP_TAIL = 16;          // fine del blocco che potrebbe contenere l'inizio spezzato di un tag ("<progr")
+  var MAX_PENDING = 2 * 1024 * 1024;   // un elemento più lungo di così è malformato: lo si salta
+
+  function Parser(now) {
     now = now || Date.now();
-    var from = now - PAST, to = now + FUTURE;
-    var channels = {}, progs = {};
+    this.from = now - PAST; this.to = now + FUTURE;
+    this.channels = {}; this.progs = {};
+    this.buf = ''; this.broken = false;
+  }
 
-    // Scansione lineare con indexOf: anche un file malformato (tag non chiusi) non può bloccare l'analisi.
-    function each(tagName, fn) {
-      var open = '<' + tagName, close = '</' + tagName + '>', pos = 0;
-      while (true) {
-        var a = xml.indexOf(open, pos);
-        if (a < 0) return;
-        var c = xml.charAt(a + open.length);
-        if (c !== ' ' && c !== '>' && c !== '\t' && c !== '\n' && c !== '\r') { pos = a + open.length; continue; }
-        var h = xml.indexOf('>', a);
-        if (h < 0) return;
-        var z = xml.indexOf(close, h);
-        if (z < 0) return;                                  // niente chiusura: il resto del file non è valido
-        fn(xml.slice(a + open.length, h), xml.slice(h + 1, z));
-        pos = z + close.length;
-      }
+  function isBoundary(c) { return c === ' ' || c === '>' || c === '\t' || c === '\n' || c === '\r'; }
+
+  // Prossimo elemento <channel> o <programme> a partire da pos: {a, name} oppure null.
+  function nextOpen(s, pos) {
+    while (true) {
+      var a = s.indexOf('<', pos);
+      if (a < 0) return null;
+      if (s.charAt(a + 1) === 'p' && s.substr(a, 10) === '<programme' && isBoundary(s.charAt(a + 10))) return { a: a, name: 'programme' };
+      if (s.charAt(a + 1) === 'c' && s.substr(a, 8) === '<channel' && isBoundary(s.charAt(a + 8))) return { a: a, name: 'channel' };
+      // inizio di tag spezzato a fine blocco: va completato dal blocco successivo
+      if (s.length - a < 12) return { a: a, name: '' };
+      pos = a + 1;
     }
+  }
 
-    each('channel', function (head, body) {
-      var id = attr(head, 'id');
-      if (!id) return;
-      var names = [];
-      var reName = /<display-name\b[^>]*>([^<]*(?:<(?!\/display-name>)[^<]*)*)<\/display-name>/g, n;
-      while ((n = reName.exec(body))) names.push(decode(stripCdata(n[1])));
-      var icon = /<icon\b[^>]*src="([^"]*)"/.exec(body);
-      channels[id] = { names: names, icon: icon ? decode(icon[1]) : '' };
-    });
+  Parser.prototype.push = function (text) {
+    if (this.broken) return this;
+    var s = this.buf ? this.buf + text : text, pos = 0, keep = -1;
+    while (true) {
+      var o = nextOpen(s, pos);
+      if (!o) break;
+      if (!o.name) { keep = o.a; break; }
+      var h = s.indexOf('>', o.a);
+      if (h < 0) { keep = o.a; break; }
+      var close = '</' + o.name + '>';
+      var z = s.indexOf(close, h);
+      if (z < 0) { keep = o.a; break; }                    // elemento non ancora completo: aspetta il resto
+      var head = s.slice(o.a + o.name.length + 1, h), body = s.slice(h + 1, z);
+      if (o.name === 'programme') this.programme(head, body); else this.channel(head, body);
+      pos = z + close.length;
+    }
+    if (keep >= 0) {
+      this.buf = s.slice(keep);
+      if (this.buf.length > MAX_PENDING) {                 // elemento senza chiusura: il resto del file non è valido
+        this.buf = ''; this.broken = true;
+      }
+    } else {
+      this.buf = s.length - pos > KEEP_TAIL ? s.slice(s.length - KEEP_TAIL) : s.slice(pos);
+    }
+    return this;
+  };
 
-    each('programme', function (head, body) {
-      var start = parseTime(attr(head, 'start'));
-      var stop = parseTime(attr(head, 'stop'));
-      if (isNaN(start)) return;
-      if (isNaN(stop)) stop = start + 3600e3;
-      if (stop < from || start > to) return;
-      var ch = attr(head, 'channel');
-      var desc = tag(body, 'desc');
-      if (desc.length > 280) desc = desc.slice(0, 277) + '…';
-      (progs[ch] || (progs[ch] = [])).push([start, stop, tag(body, 'title') || 'Senza titolo', desc, tag(body, 'category')]);
-    });
+  Parser.prototype.channel = function (head, body) {
+    var id = attr(head, 'id');
+    if (!id) return;
+    var names = [], n;
+    RE_NAME.lastIndex = 0;
+    while ((n = RE_NAME.exec(body))) names.push(decode(stripCdata(n[1])));
+    var icon = RE_ICON.exec(body);
+    this.channels[id] = { names: names, icon: icon ? decode(icon[1]) : '' };
+  };
+
+  Parser.prototype.programme = function (head, body) {
+    var start = parseTime(attr(head, 'start'));
+    var stop = parseTime(attr(head, 'stop'));
+    if (isNaN(start)) return;
+    if (isNaN(stop)) stop = start + 3600e3;
+    if (stop < this.from || start > this.to) return;
+    var ch = attr(head, 'channel');
+    var desc = tag(body, 'desc');
+    if (desc.length > 280) desc = desc.slice(0, 277) + '…';
+    var progs = this.progs;
+    (progs[ch] || (progs[ch] = [])).push([start, stop, tag(body, 'title') || 'Senza titolo', desc, tag(body, 'category')]);
+  };
+
+  Parser.prototype.finish = function () {
+    var channels = this.channels, progs = this.progs;
+    this.buf = '';
     Object.keys(progs).forEach(function (id) {
       if (!channels[id]) channels[id] = { names: [id], icon: '' };
       progs[id].sort(function (a, b) { return a[0] - b[0]; });
     });
     return { channels: channels, progs: progs };
-  }
+  };
+
+  function parse(xml, now) { return new Parser(now).push(xml).finish(); }
 
   // Collega ogni canale della playlist (ch.epg = lista programmi). Ritorna quanti canali hanno la guida.
   function match(playlist, guides) {
@@ -142,9 +196,10 @@ var EPG = (function () {
     var found = 0;
     playlist.forEach(function (ch) {
       var list = null;
-      var hex = hexIds(ch.url + ' ' + ch.logo);
+      // Chiavi del canale calcolate una volta sola (match si ripete per ogni fonte della guida).
+      if (!ch._mk) ch._mk = { hex: hexIds(ch.url + ' ' + ch.logo), cand: keys(ch.tvgId).concat(keys(ch.title || ch.name)) };
+      var hex = ch._mk.hex, cand = ch._mk.cand;
       for (var i = 0; i < hex.length && !list; i++) list = byHex[hex[i]] || null;
-      var cand = keys(ch.tvgId).concat(keys(ch.title || ch.name));
       for (var j = 0; j < cand.length && !list; j++) list = byKey[cand[j]] || null;
       ch.epg = list;
       if (list) found++;
@@ -174,14 +229,18 @@ var EPG = (function () {
   }
 
   // Versione compatta per la cache: solo i programmi dei canali usati dalla playlist.
+  // Lineare: le liste usate vengono segnate (prima indexOf dentro un ciclo su tutti i canali: costo quadratico,
+  // decine di milioni di confronti con qualche migliaio di canali).
+  var compactStamp = 0;
   function compact(guides, playlist) {
-    var used = [];
-    playlist.forEach(function (ch) { if (ch.epg && used.indexOf(ch.epg) < 0) used.push(ch.epg); });
+    var stamp = 'c' + (++compactStamp) + '_' + Date.now();
+    playlist.forEach(function (ch) { if (ch.epg) ch.epg._used = stamp; });
     var out = { channels: {}, progs: {} };
     guides.forEach(function (g) {
       Object.keys(g.progs).forEach(function (id) {
-        if (used.indexOf(g.progs[id]) >= 0 && !out.progs[id]) {
-          out.progs[id] = g.progs[id];
+        var list = g.progs[id];
+        if (list._used === stamp && !out.progs[id]) {
+          out.progs[id] = list;
           out.channels[id] = g.channels[id];
         }
       });
@@ -189,27 +248,62 @@ var EPG = (function () {
     return out;
   }
 
-  // Bytes della guida -> testo. Se è gzip la decompressione si ferma oltre MAX_XML (protegge da file "bomba").
+  // Dai byte (gzip o no) ai programmi, un blocco alla volta: decompressione, decodifica e analisi procedono
+  // insieme e in memoria restano solo i programmi utili (prima: tutto il file decompresso più una copia come testo,
+  // centinaia di MB per una guida grande). La decompressione si ferma oltre MAX_XML (protegge da file "bomba").
   var MAX_XML = 160 * 1024 * 1024;
-  function toText(bytes, pk) {
-    if (bytes[0] === 0x1f && bytes[1] === 0x8b) {
-      if (!pk) throw new Error('gzip non supportato');
-      var inf = new pk.Inflate(), parts = [], total = 0;
-      inf.onData = function (chunk) {
-        total += chunk.length;
-        if (total > MAX_XML) throw new Error('guida troppo grande');
-        parts.push(chunk);
-      };
-      inf.push(bytes, true);
-      if (inf.err) throw new Error(inf.msg || 'gzip non valido');
-      var out = new Uint8Array(total), off = 0;
-      for (var i = 0; i < parts.length; i++) { out.set(parts[i], off); off += parts[i].length; }
-      bytes = out;
+  var SLICE = 1024 * 1024;
+
+  function Feeder(pk, now) {
+    this.pk = pk; this.parser = new Parser(now); this.total = 0; this.inf = null; this.gz = null;
+    this.dec = new TextDecoder('utf-8');
+  }
+  Feeder.prototype.text = function (bytes) {
+    this.total += bytes.length;
+    if (this.total > MAX_XML) throw new Error('guida troppo grande');
+    this.parser.push(this.dec.decode(bytes, { stream: true }));
+  };
+  // Un pezzo di file (Uint8Array). last = true sull'ultimo.
+  Feeder.prototype.push = function (bytes, last) {
+    var self = this;
+    if (this.gz === null) {
+      if (!bytes.length && !last) return;
+      this.gz = bytes[0] === 0x1f && bytes[1] === 0x8b;
+      if (this.gz) {
+        if (!this.pk) throw new Error('gzip non supportato');
+        this.inf = new this.pk.Inflate();
+        this.inf.onData = function (chunk) { self.text(chunk); };
+      }
     }
-    if (bytes.length > MAX_XML) throw new Error('guida troppo grande');
-    return new TextDecoder('utf-8').decode(bytes);
+    if (this.gz) {
+      this.inf.push(bytes, !!last);
+      if (this.inf.err) throw new Error(this.inf.msg || 'gzip non valido');
+    } else {
+      for (var i = 0; i < bytes.length; i += SLICE) this.text(bytes.subarray(i, Math.min(bytes.length, i + SLICE)));
+    }
+  };
+  Feeder.prototype.finish = function () {
+    this.parser.push(this.dec.decode());
+    return this.parser.finish();
+  };
+
+  // Tutto il file in un colpo (byte già scaricati): analisi comunque a blocchi.
+  function parseBytes(bytes, pk, now) {
+    var f = new Feeder(pk, now);
+    f.push(bytes, true);
+    return f.finish();
   }
 
-  return { toText: toText, parse: parse, match: match, nowNext: nowNext, currentIndex: currentIndex, compact: compact, keys: keys, parseTime: parseTime };
+  // Compatibilità: byte -> testo intero (solo per file piccoli, es. nei test).
+  function toText(bytes, pk) {
+    var parts = [], f = new Feeder(pk, 0);
+    f.parser = { push: function (t) { parts.push(t); }, finish: function () {} };
+    f.push(bytes, true);
+    parts.push(f.dec.decode());
+    return parts.join('');
+  }
+
+  return { toText: toText, parse: parse, parseBytes: parseBytes, Feeder: Feeder, Parser: Parser, match: match, nowNext: nowNext,
+    currentIndex: currentIndex, compact: compact, keys: keys, parseTime: parseTime };
 })();
 if (typeof module !== 'undefined') module.exports = EPG;

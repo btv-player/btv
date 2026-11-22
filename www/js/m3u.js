@@ -62,6 +62,8 @@ var M3U = (function () {
         ch.groups = splitGroups(ch.group);
         out.push(ch);
         cur = null;
+      } else {
+        cur = null;   // indirizzo non supportato (es. ftp://): le sue informazioni non devono finire sul canale dopo
       }
     }
     return out;
@@ -69,3 +71,4 @@ var M3U = (function () {
 
   return { parse: parse };
 })();
+if (typeof module !== 'undefined') module.exports = M3U;

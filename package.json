@@ -5,6 +5,7 @@
   "private": true,
   "license": "MIT",
   "scripts": {
+    "test": "node test/run.js",
     "postinstall": "node tools/vendor.js",
     "icons": "powershell -ExecutionPolicy Bypass -File tools/make-icons.ps1",
     "dev": "node tools/serve.js",

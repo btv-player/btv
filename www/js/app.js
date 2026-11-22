@@ -919,7 +919,6 @@
     return urls;
   }
 
-  function guideText(bytes) { return EPG.toText(bytes, window.pako); }
 
   // Analisi in un Web Worker (l'interfaccia resta fluida); se non disponibile, sul thread principale.
   var epgWorker = null, epgWorkerBroken = false;
@@ -933,7 +932,7 @@
   }
 
   function parseGuide(bytes, now) {
-    function onMain() { return EPG.parse(guideText(bytes), now); }
+    function onMain() { return EPG.parseBytes(bytes, window.pako, now); }
     if (epgWorkerBroken || !window.Worker) return Promise.resolve().then(onMain);
     return new Promise(function (resolve, reject) {
       try {
