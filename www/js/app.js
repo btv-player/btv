@@ -61,7 +61,7 @@
     activeId: Store.get('activePlaylist', ''),
     screen: 'browse',
     playList: [], playIdx: -1, playing: null,
-    hls: null, mode: null, fallbackTried: false, netRetry: false, mediaRetry: false,
+    hls: null, mode: null, loader: null, zapTarget: null,
     timers: {}, numBuf: '', lastBack: 0, returnFocus: null, loadToken: 0,
     epgEnabled: Store.get('epgEnabled', true),
     epgSources: loadEpgSources(),
@@ -71,6 +71,19 @@
     multiPref: Store.get('multiPref', 0), multi: null, multiReturn: null, multiBrowseFocus: null, picker: null,
     resumeLast: Store.get('resumeLast', true), resumed: false, prevUrl: null,
     hideDead: Store.get('hideDead', false), dead: loadDead()
+  };
+
+  // Diagnostica: tempi delle operazioni principali (avvio, playlist, guida, cambio canale) e memoria,
+  // visibili in Impostazioni → Diagnostica. Solo su questo dispositivo, niente viene inviato.
+  var Diag = {
+    start: Date.now(),
+    items: [],
+    time: function (label, ms) {
+      Diag.items.push({ at: Date.now(), label: label, ms: Math.round(ms) });
+      if (Diag.items.length > 40) Diag.items.shift();
+      if (window.console && console.log) console.log('[BTV] ' + label + ': ' + Math.round(ms) + ' ms');
+    },
+    since: function (label, t0) { Diag.time(label, Date.now() - t0); }
   };
 
   var $ = function (id) { return document.getElementById(id); };
@@ -620,15 +633,24 @@
   function previewStop() {
     var pv = state.pv;
     clearTimeout(pv.timer);
-    if (pv.hls) { try { pv.hls.destroy(); } catch (e) { /* ignora */ } pv.hls = null; }
-    var v = el.pvVideo;
-    v.onerror = null;
-    try { v.pause(); } catch (e) { /* ignora */ }
-    v.removeAttribute('src');
-    try { v.load(); } catch (e) { /* ignora */ }
+    if (pv.loader) pv.loader.stop();
     pv.playingUrl = '';
     clearTimeout(pv.watchTimer);
     el.pvPanel.classList.remove('loading');
+  }
+
+  function previewLoader() {
+    var pv = state.pv;
+    if (!pv.loader) {
+      pv.loader = createLoader(el.pvVideo, {
+        hls: { capLevelToPlayerSize: true, startLevel: 0, maxBufferLength: 10, maxMaxBufferLength: 15,
+          backBufferLength: 0, maxBufferSize: 15 * 1000 * 1000, fragLoadingMaxRetry: 2 },
+        onMode: function (mode, hls) { pv.hls = hls; },
+        onPlaying: function () { el.pvPanel.classList.remove('loading'); },
+        onFail: function () { previewStop(); }
+      });
+    }
+    return pv.loader;
   }
 
   function previewPlay(ch) {
@@ -650,39 +672,109 @@
       if (state.prevUrl !== before) renderQuick();
     }, 10000);
     el.pvPanel.classList.add('loading');
-    el.pvVideo.onplaying = function () { el.pvPanel.classList.remove('loading'); };
-    // Come nel lettore: se un modo non funziona si prova l'altro (su Fire TV hls.js fallisce con i server
-    // senza CORS, mentre il lettore nativo li riproduce: prima l'anteprima restava vuota).
-    previewStart(ch.url, /\.m3u8?(\?|$)|\/hls\/|m3u8/i.test(ch.url) && hlsJsSupported(), false);
+    previewLoader().start(ch.url);
   }
 
-  function previewStart(url, useHls, isRetry) {
-    var pv = state.pv, v = el.pvVideo;
-    function retry() {
-      if (pv.playingUrl !== url) return;
-      if (isRetry || (!useHls && !hlsJsSupported())) { previewStop(); return; }
-      if (pv.hls) { try { pv.hls.destroy(); } catch (e) { /* ignora */ } pv.hls = null; }
-      v.onerror = null;
-      try { v.pause(); } catch (e) { /* ignora */ }
-      v.removeAttribute('src');
-      try { v.load(); } catch (e) { /* ignora */ }
-      previewStart(url, !useHls, true);
+  // ---------------------------------------------------------------- Caricatore dei flussi
+  // Unico per lettore, anteprima e multivisione. Prova un metodo (hls.js o lettore nativo) e, se fallisce o non
+  // parte entro il tempo limite, l'altro; ogni tentativo ha il suo timer. Ricorda per ogni server quale metodo ha
+  // funzionato, così al cambio canale si parte subito da quello giusto (su Fire TV hls.js fallisce con i server
+  // senza CORS: prima ogni cambio canale aspettava i ritentativi di hls.js prima di passare al nativo).
+  var streamModes = Store.get('streamModes', {});
+  function streamHost(url) { var m = /^[a-z]+:\/\/(?:[^@\/]*@)?([^\/?#]+)/i.exec(url || ''); return m ? m[1].toLowerCase() : ''; }
+  function looksHls(url) { return /\.m3u8?(\?|$)|\/hls\/|m3u8/i.test(url); }
+  function rememberMode(url, mode) {
+    var h = streamHost(url);
+    if (!h || streamModes[h] === mode) return;
+    streamModes[h] = mode;
+    var keys = Object.keys(streamModes);
+    if (keys.length > 200) delete streamModes[keys[0]];
+    Store.set('streamModes', streamModes);
+  }
+  function modeOrder(url) {
+    if (!hlsJsSupported()) return ['native'];
+    if (looksHls(url)) return streamModes[streamHost(url)] === 'native' ? ['native', 'hlsjs'] : ['hlsjs', 'native'];
+    return ['native', 'hlsjs'];
+  }
+
+  // cfg: hls (opzioni hls.js), timeout, onMode(mode, hls), onHls(hls), onPlaying(), onFail(msg),
+  //      onFirstFail(msg) → true per non provare il secondo metodo.
+  function createLoader(video, cfg) {
+    var L = { url: '', mode: null, hls: null, token: 0, timer: null, ok: false };
+    var timeout = cfg.timeout || STREAM_TIMEOUT;
+    function setMode(mode, hls) { L.mode = mode; L.hls = hls; if (cfg.onMode) cfg.onMode(mode, hls); }
+    function teardown() {
+      clearTimeout(L.timer);
+      if (L.hls) { try { L.hls.destroy(); } catch (e) { /* ignora */ } }
+      setMode(null, null);
+      try { video.pause(); } catch (e) { /* ignora */ }
+      video.removeAttribute('src');
+      try { video.load(); } catch (e) { /* ignora */ }
     }
-    if (useHls) {
-      var Hls = window.Hls;
-      var hls = new Hls({ capLevelToPlayerSize: true, startLevel: 0, maxBufferLength: 10, maxMaxBufferLength: 15,
-        backBufferLength: 0, maxBufferSize: 15 * 1000 * 1000, manifestLoadingMaxRetry: 1, fragLoadingMaxRetry: 2 });
-      pv.hls = hls;
-      v.onerror = null;
-      hls.on(Hls.Events.ERROR, function (e, d) { if (d.fatal && pv.hls === hls) retry(); });
-      hls.on(Hls.Events.MANIFEST_PARSED, function () { var p = v.play(); if (p && p.catch) p.catch(function () {}); });
-      hls.loadSource(url);
-      hls.attachMedia(v);
-    } else {
-      v.onerror = function () { if (!pv.hls) retry(); };
-      v.src = url;
-      var p = v.play(); if (p && p.catch) p.catch(function () {});
+    function play() { var p = video.play(); if (p && p.catch) p.catch(function () { /* autoplay bloccato */ }); }
+    function failAttempt(msg, token) {
+      if (token !== L.token) return;
+      var url = L.url;
+      teardown();
+      if (L.attempt === 0 && cfg.onFirstFail && cfg.onFirstFail(msg)) return;
+      if (L.attempt + 1 < L.order.length) { L.attempt++; tryMode(); return; }
+      L.token++;
+      if (cfg.onFail) cfg.onFail(msg, url);
     }
+    function tryMode() {
+      var token = L.token, mode = L.order[L.attempt], url = L.url;
+      L.netRetry = false; L.mediaRetry = false; L.ok = false;
+      clearTimeout(L.timer);
+      L.timer = setTimeout(function () { failAttempt('Il canale non risponde.', token); }, timeout);
+      if (mode === 'hlsjs') {
+        var Hls = window.Hls, opts = {}, k;
+        for (k in cfg.hls) opts[k] = cfg.hls[k];
+        // Manifest: un solo nuovo tentativo, breve (un server che rifiuta non cambia idea dopo 3 secondi).
+        if (opts.manifestLoadingMaxRetry === undefined) opts.manifestLoadingMaxRetry = 1;
+        if (opts.manifestLoadingRetryDelay === undefined) opts.manifestLoadingRetryDelay = 500;
+        var hls = new Hls(opts);
+        setMode('hlsjs', hls);
+        hls.on(Hls.Events.ERROR, function (ev, d) {
+          if (!d.fatal || L.hls !== hls || token !== L.token) return;
+          if (d.type === Hls.ErrorTypes.NETWORK_ERROR && !L.netRetry && d.details !== 'manifestLoadError') {
+            L.netRetry = true; setTimeout(function () { if (L.hls === hls) hls.startLoad(); }, 1000);
+          } else if (d.type === Hls.ErrorTypes.MEDIA_ERROR && !L.mediaRetry) {
+            L.mediaRetry = true; hls.recoverMediaError();
+          } else {
+            failAttempt(d.details === 'manifestLoadError' ? 'Il server del canale non risponde o blocca la riproduzione.' :
+              'Errore di riproduzione (' + d.details + ').', token);
+          }
+        });
+        hls.on(Hls.Events.MANIFEST_PARSED, play);
+        if (cfg.onHls) cfg.onHls(hls);
+        hls.loadSource(url);
+        hls.attachMedia(video);
+      } else {
+        setMode('native', null);
+        video.src = url;
+        play();
+      }
+    }
+    video.addEventListener('playing', function () {
+      if (!L.url || L.ok) return;
+      L.ok = true;
+      clearTimeout(L.timer);
+      rememberMode(L.url, L.mode);
+      if (cfg.onPlaying) cfg.onPlaying();
+    });
+    video.addEventListener('error', function () {
+      if (L.url && L.mode === 'native' && video.getAttribute('src')) failAttempt('Formato non supportato o canale offline.', L.token);
+    });
+    L.start = function (url) {
+      L.token++;
+      teardown();
+      L.url = url; L.ok = false; L.attempt = 0; L.order = modeOrder(url);
+      tryMode();
+    };
+    L.stop = function () { L.token++; L.url = ''; L.ok = false; teardown(); };
+    // Cambia metodo a riproduzione avviata (es. errore definitivo a metà): come un fallimento del tentativo.
+    L.fail = function (msg) { failAttempt(msg, L.token); };
+    return L;
   }
 
   // Home ferma per 1 minuto (nessun tasto) con l'anteprima in riproduzione: il canale si apre a schermo intero.
@@ -1333,79 +1425,69 @@
     showOsd(false);
   }
 
+  // Cambio canale con su/giù o CH±: le pressioni ravvicinate si sommano e parte solo il canale finale
+  // (prima ogni pressione avviava e distruggeva un lettore: tenendo premuto la TV si impuntava).
+  var ZAP_DELAY = 250;
+  function zap(step) {
+    var n = state.playList.length;
+    if (!n) return;
+    var from = state.zapTarget === null ? state.playIdx : state.zapTarget;
+    state.zapTarget = ((from + step) % n + n) % n;
+    fillOsdChannel(state.playList[state.zapTarget], state.zapTarget);
+    clearTimeout(state.timers.zap);
+    state.timers.zap = setTimeout(function () {
+      var t = state.zapTarget;
+      state.zapTarget = null;
+      if (state.screen === 'player' && t !== null && t !== state.playIdx) playIndex(t);
+    }, ZAP_DELAY);
+  }
+
   function hlsJsSupported() { return !!(window.Hls && window.Hls.isSupported()); }
+
+  function playerLoader() {
+    if (!state.loader) {
+      state.loader = createLoader(el.video, {
+        hls: {
+          enableWorker: true,
+          lowLatencyMode: false,
+          // Timeshift: conserva ciò che hai già visto e continua a scaricare mentre sei in pausa.
+          backBufferLength: TIMESHIFT_SECONDS,
+          maxBufferLength: LIVE_AHEAD,          // mentre guardi: 30 s di anticipo (in pausa si allarga, vedi sotto)
+          maxMaxBufferLength: TIMESHIFT_SECONDS,
+          maxBufferSize: BUFFER_BYTES,
+          fragLoadingMaxRetry: 3
+        },
+        onMode: function (mode, hls) { state.mode = mode; state.hls = hls; if (!hls) state.levels = []; },
+        onHls: function (hls) {
+          var Hls = window.Hls;
+          hls.on(Hls.Events.MANIFEST_PARSED, function (ev, data) {
+            state.levels = (data.levels || hls.levels || []).map(function (l, idx) { return { idx: idx, height: l.height || 0, bitrate: l.bitrate || 0 }; });
+            applyQuality();
+          });
+          hls.on(Hls.Events.LEVEL_SWITCHED, updateQualityLabel);
+          hls.on(Hls.Events.AUDIO_TRACKS_UPDATED, applyTrackPrefs);
+          hls.on(Hls.Events.SUBTITLE_TRACKS_UPDATED, applyTrackPrefs);
+          hls.on(Hls.Events.AUDIO_TRACK_SWITCHED, updateTrackButtons);
+        },
+        onFail: function (msg) { if (state.screen === 'player' && state.playing) showPlayerError(msg); }
+      });
+    }
+    return state.loader;
+  }
 
   function startStream(ch) {
     stopStream();
     el.perr.classList.add('hidden');
-    if (!/^https?:\/\//i.test(ch.url)) {
-      el.perr.querySelector('.perr-msg').textContent = 'Indirizzo del canale non supportato (sono ammessi solo http e https).';
-      el.perr.classList.remove('hidden');
-      return;
-    }
-    if (blockedLan(ch.url)) {
-      el.perr.querySelector('.perr-msg').textContent = 'Questo canale punta a un dispositivo della tua rete di casa: bloccato per sicurezza.';
-      el.perr.classList.remove('hidden');
-      return;
-    }
+    if (!/^https?:\/\//i.test(ch.url)) { showPlayerError('Indirizzo del canale non supportato (sono ammessi solo http e https).', true); return; }
+    if (blockedLan(ch.url)) { showPlayerError('Questo canale punta a un dispositivo della tua rete di casa: bloccato per sicurezza.', true); return; }
     el.spinner.classList.add('on');
-    state.fallbackTried = false; state.netRetry = false; state.mediaRetry = false;
     state.userShift = false;
     state.levels = [];
     state.started = false; state.stallSec = 0; state.okSec = 0; state.lastTime = -1;
-    var url = ch.url;
-    var looksHls = /\.m3u8?(\?|$)|\/hls\/|m3u8/i.test(url);
-    // hls.js per primo: permette di scegliere la qualità e di tornare indietro (timeshift).
-    // Se fallisce (es. server senza CORS) si passa al lettore nativo della TV.
-    if (looksHls && hlsJsSupported()) playWithHlsJs(url);
-    else playNative(url);
-    clearTimeout(state.timers.stream);
-    state.timers.stream = setTimeout(function () { fail('Il canale non risponde.'); }, STREAM_TIMEOUT);
-  }
-
-  function playNative(url) {
-    state.mode = 'native';
-    state.levels = [];
-    el.video.src = url;
-    tryPlay();
-  }
-
-  function playWithHlsJs(url) {
-    state.mode = 'hlsjs';
-    var Hls = window.Hls;
-    var hls = new Hls({
-      enableWorker: true,
-      lowLatencyMode: false,
-      // Timeshift: conserva ciò che hai già visto e continua a scaricare mentre sei in pausa.
-      backBufferLength: TIMESHIFT_SECONDS,
-      maxBufferLength: LIVE_AHEAD,          // mentre guardi: 30 s di anticipo (in pausa si allarga, vedi sotto)
-      maxMaxBufferLength: TIMESHIFT_SECONDS,
-      maxBufferSize: BUFFER_BYTES,
-      manifestLoadingMaxRetry: 2,
-      fragLoadingMaxRetry: 3
-    });
-    state.hls = hls;
-    hls.on(Hls.Events.ERROR, function (ev, data) {
-      if (!data.fatal || state.hls !== hls) return;
-      if (data.type === Hls.ErrorTypes.NETWORK_ERROR && !state.netRetry && data.details !== 'manifestLoadError') {
-        state.netRetry = true; hls.startLoad();
-      } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR && !state.mediaRetry) {
-        state.mediaRetry = true; hls.recoverMediaError();
-      } else {
-        fail(data.details === 'manifestLoadError' ? 'Il server del canale non risponde o blocca la riproduzione.' : 'Errore di riproduzione (' + data.details + ').');
-      }
-    });
-    hls.on(Hls.Events.MANIFEST_PARSED, function (ev, data) {
-      state.levels = (data.levels || hls.levels || []).map(function (l, idx) { return { idx: idx, height: l.height || 0, bitrate: l.bitrate || 0 }; });
-      applyQuality();
-      tryPlay();
-    });
-    hls.on(Hls.Events.LEVEL_SWITCHED, updateQualityLabel);
-    hls.on(Hls.Events.AUDIO_TRACKS_UPDATED, applyTrackPrefs);
-    hls.on(Hls.Events.SUBTITLE_TRACKS_UPDATED, applyTrackPrefs);
-    hls.on(Hls.Events.AUDIO_TRACK_SWITCHED, updateTrackButtons);
-    hls.loadSource(url);
-    hls.attachMedia(el.video);
+    state.zapStart = Date.now();
+    // Prima il metodo che ha funzionato l'ultima volta con questo server (di solito hls.js: qualità e timeshift),
+    // poi l'altro. Ogni tentativo ha il suo tempo limite (vedi createLoader).
+    playerLoader().start(ch.url);
   }
 
   function tryPlay() {
@@ -1413,40 +1495,25 @@
     if (p && p.catch) p.catch(function () { /* autoplay bloccato: l'utente può premere Play */ });
   }
 
-  // Se il metodo scelto fallisce, prova l'altro una volta prima di mostrare l'errore.
-  function fail(msg) {
-    if (state.screen !== 'player' || !state.playing) return;
-    if (!state.fallbackTried) {
-      state.fallbackTried = true;
-      var url = state.playing.url;
-      if (state.mode === 'native' && hlsJsSupported()) { destroyHls(); playWithHlsJs(url); return; }
-      if (state.mode === 'hlsjs') { destroyHls(); playNative(url); return; }
-    }
-    clearTimeout(state.timers.stream);
+  // Errore definitivo (entrambi i metodi falliti o canale che continua a bloccarsi).
+  function showPlayerError(msg, plain) {
+    clearTimeout(state.timers.stall);
     el.spinner.classList.remove('on');
-    el.perr.querySelector('.perr-msg').textContent = msg + ' Alcuni canali sono attivi solo in certi orari o paesi.';
-    setDead(state.playing.url, true);
+    el.perr.querySelector('.perr-msg').textContent = plain ? msg : msg + ' Alcuni canali sono attivi solo in certi orari o paesi.';
+    if (!plain && state.playing) setDead(state.playing.url, true);
     el.perr.classList.remove('hidden');
   }
 
-  function destroyHls() {
-    if (state.hls) { try { state.hls.destroy(); } catch (e) { /* ignora */ } state.hls = null; }
-  }
-
   function stopStream() {
-    clearTimeout(state.timers.stream);
-    destroyHls();
-    var v = el.video;
-    try { v.pause(); } catch (e) { /* ignora */ }
-    v.removeAttribute('src');
-    try { v.load(); } catch (e) { /* ignora */ }
+    clearTimeout(state.timers.stall);
+    if (state.loader) state.loader.stop();
     el.spinner.classList.remove('on');
   }
 
   el.video.addEventListener('playing', function () {
     if (state.playing) setDead(state.playing.url, false);
+    if (!state.started && state.zapStart) Diag.time('Cambio canale (' + (state.mode === 'hlsjs' ? 'hls.js' : 'nativo') + ')', Date.now() - state.zapStart);
     state.started = true;
-    clearTimeout(state.timers.stream);
     el.spinner.classList.remove('on');
     el.perr.classList.add('hidden');
   });
@@ -1466,16 +1533,17 @@
     state.stallSec = 0; state.okSec = 0;
     if (state.stallRetries < STALL_RETRIES) {
       state.stallRetries++;
+      // Attese crescenti tra un riavvio e l'altro (subito, 3 s, 8 s): un server in difficoltà ha il tempo di riprendersi.
+      var wait = [0, 3000, 8000][state.stallRetries - 1] || 8000, ch = state.playing;
       toast('Il canale si è bloccato: lo riavvio (' + state.stallRetries + '/' + STALL_RETRIES + ')…');
-      startStream(state.playing);
+      state.started = false;
+      clearTimeout(state.timers.stall);
+      state.timers.stall = setTimeout(function () { if (state.screen === 'player' && state.playing === ch) startStream(ch); }, wait);
     } else {
       state.started = false;
-      fail('Il canale continua a bloccarsi.');
+      showPlayerError('Il canale continua a bloccarsi.');
     }
   }
-  el.video.addEventListener('error', function () {
-    if (state.screen === 'player' && state.mode === 'native' && el.video.getAttribute('src')) fail('Formato non supportato o canale offline.');
-  });
 
   // ---------------------------------------------------------------- Qualità
   // state.quality = altezza preferita (0 = automatica), ricordata tra un canale e l'altro.
@@ -1663,13 +1731,20 @@
   }
 
   // ---------------------------------------------------------------- Barra info (OSD)
+  // Logo, numero, nome e gruppo del canale nella barra (anche del canale verso cui si sta cambiando).
+  function fillOsdChannel(ch, idx) {
+    if (!ch) return;
+    var lg = el.osd.querySelector('.osd-logo');
+    if (lg._url !== ch.url) { lg._url = ch.url; fillLogo(lg, ch); }       // il logo si ricrea solo se cambia canale
+    el.osd.querySelector('.osd-num').textContent = ch.num;
+    el.osd.querySelector('.osd-name').textContent = ch.title;
+    el.osd.querySelector('.osd-group').textContent = ch.groups.join(' · ') + '   (' + (idx + 1) + '/' + state.playList.length + ')';
+  }
+
   function showOsd(withFocus) {
     var ch = state.playing;
     if (!ch) return;
-    fillLogo(el.osd.querySelector('.osd-logo'), ch);
-    el.osd.querySelector('.osd-num').textContent = ch.num;
-    el.osd.querySelector('.osd-name').textContent = ch.title;
-    el.osd.querySelector('.osd-group').textContent = ch.groups.join(' · ') + '   (' + (state.playIdx + 1) + '/' + state.playList.length + ')';
+    if (state.zapTarget === null) fillOsdChannel(ch, state.playIdx);
     updateOsdFav();
     fillOsdEpg();
     updateQualityLabel();
@@ -2007,11 +2082,7 @@
 
   function tileStop(i) {
     var t = state.multi.tiles[i];
-    clearTimeout(t.timer);
-    if (t.hls) { try { t.hls.destroy(); } catch (e) { /* ignora */ } t.hls = null; }
-    try { t.video.pause(); } catch (e) { /* ignora */ }
-    t.video.removeAttribute('src');
-    try { t.video.load(); } catch (e) { /* ignora */ }
+    if (t.loader) t.loader.stop();
     t.el.classList.remove('loading');
     t.played = false; t.dTime = 0;
   }
@@ -2062,18 +2133,11 @@
     toast('Questa TV riproduce un solo video alla volta: in multivisione va il riquadro selezionato, gli altri mostrano cosa c\'è in onda', 7000);
   }
 
+  // Errore definitivo del riquadro (il caricatore ha già provato entrambi i metodi).
   function tileFail(i, msg) {
     var m = state.multi; if (!m) return;
     var t = m.tiles[i];
-    if (!state.multiSingle && (platform === 'webos' || platform === 'tizen') &&
-        m.tiles.some(function (o, j) { return j !== i && o.played; })) { enableSingleVideo(); return; } // limite della TV, non del canale
-    if (!t.fallback && t.ch) {
-      t.fallback = true;
-      var url = t.ch.url;
-      if (t.mode === 'hlsjs') { if (t.hls) { t.hls.destroy(); t.hls = null; } tileNative(i, url); return; }
-      if (t.mode === 'native' && hlsJsSupported()) { tileHls(i, url); return; }
-    }
-    clearTimeout(t.timer);
+    if (tileTvLimit(i)) return;
     t.el.classList.remove('loading');
     var err = t.el.querySelector('.tile-err');
     err.textContent = msg;
@@ -2081,36 +2145,42 @@
     err.classList.remove('hidden');
   }
 
-  function tileNative(i, url) {
-    var t = state.multi.tiles[i];
-    t.mode = 'native';
-    t.video.src = url;
-    var p = t.video.play(); if (p && p.catch) p.catch(function () {});
+  // TV con un solo decoder: se un altro riquadro sta già andando, il problema è la TV, non il canale.
+  function tileTvLimit(i) {
+    var m = state.multi;
+    if (state.multiSingle || !(platform === 'webos' || platform === 'tizen')) return false;
+    if (!m.tiles.some(function (o, j) { return j !== i && o.played; })) return false;
+    enableSingleVideo();
+    return true;
   }
 
-  function tileHls(i, url) {
-    var t = state.multi.tiles[i];
-    var Hls = window.Hls;
-    t.mode = 'hlsjs';
-    // Riquadri piccoli: qualità limitata alla dimensione del riquadro e buffer ridotto (meno memoria e rete).
-    // liveMaxLatency/maxLiveSyncPlaybackRate: se il riquadro resta indietro, hls.js lo riporta in diretta da solo.
-    var hls = new Hls({ capLevelToPlayerSize: true, startLevel: 0, maxBufferLength: 12, maxMaxBufferLength: 20,
-      liveSyncDurationCount: 3, liveMaxLatencyDurationCount: 7, maxLiveSyncPlaybackRate: 1.15,
-      backBufferLength: 0, maxBufferSize: 20 * 1000 * 1000, manifestLoadingMaxRetry: 1, fragLoadingMaxRetry: 2 });
-    t.hls = hls;
-    hls.on(Hls.Events.ERROR, function (ev, d) {
-      if (d.fatal && t.hls === hls) tileFail(i, d.details === 'manifestLoadError' ? 'Canale non raggiungibile' : 'Errore di riproduzione');
-    });
-    hls.on(Hls.Events.MANIFEST_PARSED, function () { var p = t.video.play(); if (p && p.catch) p.catch(function () {}); });
-    hls.loadSource(url);
-    hls.attachMedia(t.video);
+  function tileLoader(t) {
+    if (!t.loader) {
+      // Riquadri piccoli: qualità limitata alla dimensione del riquadro e buffer ridotto (meno memoria e rete).
+      // liveMaxLatency/maxLiveSyncPlaybackRate: se il riquadro resta indietro, hls.js lo riporta in diretta da solo.
+      t.loader = createLoader(t.video, {
+        hls: { capLevelToPlayerSize: true, startLevel: 0, maxBufferLength: 12, maxMaxBufferLength: 20,
+          liveSyncDurationCount: 3, liveMaxLatencyDurationCount: 7, maxLiveSyncPlaybackRate: 1.15,
+          backBufferLength: 0, maxBufferSize: 20 * 1000 * 1000, fragLoadingMaxRetry: 2 },
+        onMode: function (mode, hls) { t.mode = mode; t.hls = hls; },
+        onPlaying: function () { t.el.classList.remove('loading'); t.played = true; },
+        // Sulle TV il primo fallimento di un secondo riquadro è quasi sempre il limite del decoder: niente secondo tentativo.
+        onFirstFail: function () { return tileTvLimit(+t.el.getAttribute('data-i')); },
+        onFail: function (msg) {
+          var i = +t.el.getAttribute('data-i');
+          tileFail(i, /non risponde/.test(msg) && i > 0 && (platform === 'tizen' || platform === 'webos') ?
+            'La TV non riesce a riprodurre un altro video insieme' : msg.replace(/\.$/, ''));
+        }
+      });
+    }
+    return t.loader;
   }
 
   function tileLoad(i, ch) {
     var m = state.multi;
     var t = m.tiles[i];
     tileStop(i);
-    t.ch = ch; t.fallback = false;
+    t.ch = ch;
     t.el.classList.remove('empty');
     t.el.classList.add('loading');
     t.el.querySelector('.tile-err').classList.add('hidden');
@@ -2120,19 +2190,9 @@
     showTileLabel(i);
     t.el.classList.remove('standby');
     if (state.multiSingle && i !== m.focus) { tileStandby(i); updateTileAudio(); return; }
-    if (!t.video._wired) {
-      t.video._wired = true;
-      t.video.addEventListener('playing', function () { clearTimeout(t.timer); t.el.classList.remove('loading'); t.played = true; });
-      t.video.addEventListener('error', function () { if (t.mode === 'native' && t.video.getAttribute('src')) tileFail(+t.el.getAttribute('data-i'), 'Formato non supportato o canale offline'); });
-    }
     if (!/^https?:\/\//i.test(ch.url)) { tileFail(i, 'Indirizzo non supportato'); return; }
     if (blockedLan(ch.url)) { tileFail(i, 'Bloccato: punta alla rete di casa'); return; }
-    if (/\.m3u8?(\?|$)|\/hls\/|m3u8/i.test(ch.url) && hlsJsSupported()) tileHls(i, ch.url);
-    else tileNative(i, ch.url);
-    t.timer = setTimeout(function () {
-      tileFail(i, i > 0 && (platform === 'tizen' || platform === 'webos') ?
-        'La TV non riesce a riprodurre un altro video insieme' : 'Il canale non risponde');
-    }, STREAM_TIMEOUT);
+    tileLoader(t).start(ch.url);
     updateTileAudio();
   }
 
@@ -2738,23 +2798,26 @@
     if (a.indexOf('digit') === 0) { if (state.screen !== 'settings') { typeDigit(a.slice(5)); return true; } return false; }
 
     if (state.screen === 'player') {
+      // Frecce e OK con la barra nascosta: la prima pressione apre solo la barra con tutte le opzioni,
+      // l'azione (cambio canale, spostamento, conferma) arriva dalla pressione successiva.
+      // I tasti dedicati (CH+/CH−, colori, play, numeri) agiscono subito.
+      var osdOn = osdVisible() && Nav.current() && el.osd.contains(Nav.current());
+      if (!osdOn && (a === 'up' || a === 'down' || a === 'left' || a === 'right' || a === 'enter')) {
+        showOsd(false);
+        Nav.setRoot(el.osd, behindLive() ? el.osdLive : el.osdPause);
+        showOsd(true);
+        return true;
+      }
       switch (a) {
-        case 'up': case 'chup': playIndex(state.playIdx + 1); return true;
-        case 'down': case 'chdown': playIndex(state.playIdx - 1); return true;
+        case 'up': zap(1); showOsd(true); return true;
+        case 'down': zap(-1); showOsd(true); return true;
+        case 'chup': zap(1); return true;
+        case 'chdown': zap(-1); return true;
         case 'rw': seekBy(-SEEK_STEP); return true;
         case 'ff': seekBy(SEEK_STEP); return true;
-        case 'left': case 'right':
-          // Barra visibile: muovi tra i pulsanti. Barra nascosta: la apre sul pulsante ⏪/⏩
-          // (prima tornava subito indietro di 30 s ed era facile farlo per sbaglio).
-          if (osdVisible() && Nav.current() && el.osd.contains(Nav.current())) { Nav.move(a); showOsd(true); }
-          else { showOsd(false); Nav.setRoot(el.osd, el.osd.querySelector(a === 'left' ? '[data-action="seekBack"]' : '[data-action="seekFwd"]')); showOsd(true); }
-          return true;
+        case 'left': case 'right': Nav.move(a); showOsd(true); return true;   // barra aperta: muovi tra i pulsanti
         case 'live': goLive(); return true;
-        case 'enter':
-          if (osdVisible() && Nav.current() && el.osd.contains(Nav.current())) activate(Nav.current());
-          else if (behindLive()) { showOsd(false); Nav.setRoot(el.osd, el.osdLive); showOsd(true); } // OK → pronto su "Diretta"
-          else showOsd(true);
-          return true;
+        case 'enter': activate(Nav.current()); return true;
         case 'guide': openGuide(state.playList, state.playIdx); return true;
         case 'menu': case 'list': openChannelList(); return true;
         case 'prevch': prevChannel(); return true;
