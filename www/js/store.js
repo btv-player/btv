@@ -52,11 +52,13 @@ var Cache = (function () {
     dbp = new Promise(function (resolve, reject) {
       if (!window.indexedDB) { reject(new Error('IndexedDB assente')); return; }
       var r;
-      try { r = window.indexedDB.open(DB, 1); } catch (e) { reject(e); return; }
+      // Su alcuni dispositivi l'apertura può restare in attesa per sempre: dopo 3 s si usa localStorage.
+      var guard = setTimeout(function () { reject(new Error('IndexedDB non risponde')); }, 3000);
+      try { r = window.indexedDB.open(DB, 1); } catch (e) { clearTimeout(guard); reject(e); return; }
       r.onupgradeneeded = function () { r.result.createObjectStore(OS); };
-      r.onsuccess = function () { resolve(r.result); };
-      r.onerror = function () { reject(r.error || new Error('IndexedDB')); };
-      r.onblocked = function () { reject(new Error('IndexedDB bloccato')); };
+      r.onsuccess = function () { clearTimeout(guard); resolve(r.result); };
+      r.onerror = function () { clearTimeout(guard); reject(r.error || new Error('IndexedDB')); };
+      r.onblocked = function () { clearTimeout(guard); reject(new Error('IndexedDB bloccato')); };
     });
     dbp.then(migrate, function () { /* niente IndexedDB: si usa localStorage */ });
     return dbp;
