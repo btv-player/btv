@@ -109,6 +109,7 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.security.MessageDigest;
 import java.util.Locale;
+import com.getcapacitor.JSObject;
 
 // Generato da tools/patch-android.js: non modificare a mano.
 @CapacitorPlugin(name = "Screen")
@@ -116,6 +117,84 @@ public class ScreenPlugin extends Plugin {
     // Unica fonte accettata per gli aggiornamenti (le release del progetto su GitHub).
     private static final String UPDATE_PREFIX = "https://github.com/btv-player/btv/releases/download/";
     private static final long MAX_APK = 100L * 1024 * 1024;
+
+    // Download di playlist e guida direttamente su file (nella cache dell'app): i byte non passano dalla pagina
+    // (prima arrivavano come testo base64, più del doppio della memoria) e c'è un tempo limite.
+    // Se si passano etag/lastModified della volta prima e il server risponde "non cambiato" (304), il file resta quello.
+    @PluginMethod
+    public void download(PluginCall call) {
+        final String url = call.getString("url", "");
+        final String name = call.getString("name", "");
+        final long max = call.getLong("max", 60L * 1024 * 1024);
+        final int timeout = call.getInt("timeout", 90000);
+        final String etag = call.getString("etag", "");
+        final String lastMod = call.getString("lastModified", "");
+        if (!(url.startsWith("http://") || url.startsWith("https://")) || !name.matches("[a-z0-9-]{1,40}")) { call.reject("richiesta non valida"); return; }
+        new Thread(() -> {
+            File tmp = null;
+            HttpURLConnection c = null;
+            try {
+                File dir = new File(getContext().getCacheDir(), "dl");
+                if (!dir.exists() && !dir.mkdirs()) throw new IOException("cartella");
+                File out = new File(dir, name);
+                tmp = new File(dir, name + ".part");
+                final long deadline = System.currentTimeMillis() + timeout;
+                URL u = new URL(url);
+                int redirects = 0, code;
+                while (true) {
+                    c = (HttpURLConnection) u.openConnection();
+                    c.setInstanceFollowRedirects(false);
+                    c.setConnectTimeout(15000);
+                    c.setReadTimeout(30000);
+                    c.setRequestProperty("Accept-Encoding", "identity");
+                    if (out.exists() && !etag.isEmpty()) c.setRequestProperty("If-None-Match", etag);
+                    if (out.exists() && !lastMod.isEmpty()) c.setRequestProperty("If-Modified-Since", lastMod);
+                    code = c.getResponseCode();
+                    if (code >= 300 && code < 400 && code != 304) {
+                        String loc = c.getHeaderField("Location");
+                        c.disconnect();
+                        if (loc == null || ++redirects > 5) throw new IOException("troppi reindirizzamenti");
+                        u = new URL(u, loc);
+                        if (!"http".equals(u.getProtocol()) && !"https".equals(u.getProtocol())) throw new IOException("reindirizzamento non valido");
+                        continue;
+                    }
+                    break;
+                }
+                JSObject res = new JSObject();
+                if (code == 304 && out.exists()) {
+                    res.put("path", out.getAbsolutePath()); res.put("status", 304); res.put("size", out.length());
+                    res.put("etag", etag); res.put("lastModified", lastMod);
+                    call.resolve(res);
+                    return;
+                }
+                if (code != 200) throw new IOException("HTTP " + code);
+                long len = c.getContentLengthLong();
+                if (len > max) throw new IOException("file troppo grande");
+                long total = 0;
+                try (InputStream in = c.getInputStream(); FileOutputStream fo = new FileOutputStream(tmp)) {
+                    byte[] buf = new byte[65536];
+                    int n;
+                    while ((n = in.read(buf)) > 0) {
+                        total += n;
+                        if (total > max) throw new IOException("file troppo grande");
+                        if (System.currentTimeMillis() > deadline) throw new IOException("tempo scaduto");
+                        fo.write(buf, 0, n);
+                    }
+                }
+                if (out.exists() && !out.delete()) throw new IOException("file occupato");
+                if (!tmp.renameTo(out)) throw new IOException("salvataggio");
+                res.put("path", out.getAbsolutePath()); res.put("status", 200); res.put("size", total);
+                String et = c.getHeaderField("ETag"), lm = c.getHeaderField("Last-Modified");
+                res.put("etag", et != null ? et : ""); res.put("lastModified", lm != null ? lm : "");
+                call.resolve(res);
+            } catch (Exception e) {
+                if (tmp != null) tmp.delete();
+                call.reject(e.getMessage() != null ? e.getMessage() : "errore");
+            } finally {
+                if (c != null) c.disconnect();
+            }
+        }).start();
+    }
 
     // Schermo sempre acceso mentre si guarda (niente salvaschermo).
     @PluginMethod

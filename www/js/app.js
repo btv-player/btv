@@ -303,37 +303,60 @@
     return state.playlists[0] || null;
   }
 
-  function b64ToBytes(b64) {
-    var bin = atob(b64);
-    var out = new Uint8Array(bin.length);
-    for (var i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
-    return out;
-  }
-
   // Proxy disponibile solo con "npm run dev" (il browser applica CORS, le TV e Android no).
   function devProxy(url) {
     return platform === 'web' && /^(localhost|127\.0\.0\.1)$/.test(location.hostname) ? '/proxy?url=' + encodeURIComponent(url) : null;
   }
 
-  // GET testuale o binario (Uint8Array).
-  function httpGet(url, binary) {
-    // Su Android usa l'HTTP nativo di Capacitor: niente blocchi CORS.
-    var Http = platform === 'android' ? capPlugin('CapacitorHttp') : null;
-    if (Http) {
-      return Http.get({ url: url, responseType: binary ? 'arraybuffer' : 'text' }).then(function (r) {
-        if (r.status >= 400) throw new Error('HTTP ' + r.status);
-        if (r.data && r.data.length > MAX_DOWNLOAD * (binary ? 1.4 : 1)) throw new Error('file troppo grande');
-        if (!binary) return typeof r.data === 'string' ? r.data : String(r.data);
-        return typeof r.data === 'string' ? b64ToBytes(r.data) : new Uint8Array(r.data);
+  // ---------------------------------------------------------------- Rete
+  // Scaricamento con tempo limite. as: 'text' | 'bytes' | 'file' (solo Fire TV: indirizzo locale del file scaricato).
+  // Su Fire TV si usa il download nativo su file (niente blocchi CORS, niente base64 tra Java e pagina, richieste
+  // condizionali: con meta.etag / meta.lastModified un file non cambiato non si riscarica → notModified).
+  var PLAYLIST_TIMEOUT = 90000, GUIDE_TIMEOUT = 180000, API_TIMEOUT = 30000;
+  var dlSeq = 0;
+
+  function nativeDl() {
+    var S = platform === 'android' ? capPlugin('Screen') : null;
+    return S && S.download ? S : null;
+  }
+
+  function withTimeout(p, ms, abort) {
+    return new Promise(function (resolve, reject) {
+      var t = setTimeout(function () { if (abort) abort(); reject(new Error('tempo scaduto')); }, ms);
+      p.then(function (v) { clearTimeout(t); resolve(v); }, function (e) { clearTimeout(t); reject(e); });
+    });
+  }
+
+  function download(url, opts) {
+    opts = opts || {};
+    var as = opts.as || 'text', timeout = opts.timeout || PLAYLIST_TIMEOUT, meta = opts.meta || {};
+    var S = nativeDl();
+    if (S) {
+      return S.download({ url: url, name: opts.name || ('dl-' + (dlSeq++ % 4)), max: MAX_DOWNLOAD, timeout: timeout,
+        etag: meta.etag || '', lastModified: meta.lastModified || '' }).then(function (r) {
+        var info = { notModified: r.status === 304, meta: { etag: r.etag || '', lastModified: r.lastModified || '' }, size: r.size };
+        var local = window.Capacitor.convertFileSrc('file://' + r.path);
+        if (as === 'file') { info.fileUrl = local; return info; }
+        return fetch(local).then(function (x) { return as === 'bytes' ? x.arrayBuffer() : x.text(); }).then(function (d) {
+          if (as === 'bytes') info.bytes = new Uint8Array(d); else info.text = d;
+          return info;
+        });
       });
     }
     function direct(u) {
-      return fetch(u, { credentials: 'omit', referrerPolicy: 'no-referrer' }).then(function (r) {
+      var ctl = window.AbortController ? new AbortController() : null;
+      var req = fetch(u, { credentials: 'omit', referrerPolicy: 'no-referrer', signal: ctl ? ctl.signal : undefined }).then(function (r) {
         if (!r.ok) throw new Error('HTTP ' + r.status);
         if (+r.headers.get('content-length') > MAX_DOWNLOAD) throw new Error('file troppo grande');
-        return binary ? r.arrayBuffer().then(function (b) { if (b.byteLength > MAX_DOWNLOAD) throw new Error('file troppo grande'); return new Uint8Array(b); }) :
-          r.text().then(function (t) { if (t.length > MAX_DOWNLOAD) throw new Error('file troppo grande'); return t; });
+        if (as === 'bytes' || as === 'file') {
+          return r.arrayBuffer().then(function (b) {
+            if (b.byteLength > MAX_DOWNLOAD) throw new Error('file troppo grande');
+            return { bytes: new Uint8Array(b), meta: {} };
+          });
+        }
+        return r.text().then(function (t) { if (t.length > MAX_DOWNLOAD) throw new Error('file troppo grande'); return { text: t, meta: {} }; });
       });
+      return withTimeout(req, timeout, function () { if (ctl) ctl.abort(); });
     }
     return direct(url).catch(function (err) {
       var p = devProxy(url);
@@ -342,8 +365,74 @@
     });
   }
 
-  function fetchText(url) { return httpGet(url, false); }
+  // Librerie usate di rado (QR, gzip senza Worker): caricate al primo uso invece che a ogni avvio.
+  var libs = {};
+  function loadLib(src) {
+    if (!libs[src]) {
+      libs[src] = new Promise(function (resolve, reject) {
+        var s = document.createElement('script');
+        s.src = src;
+        s.onload = function () { resolve(); };
+        s.onerror = function () { libs[src] = null; reject(new Error('libreria non caricata')); };
+        document.body.appendChild(s);
+      });
+    }
+    return libs[src];
+  }
 
+  // Compatibilità: testo semplice (risposte piccole: API Xtream, "Invia dal telefono").
+  function httpGet(url) { return download(url, { as: 'text', timeout: API_TIMEOUT }).then(function (r) { return r.text; }); }
+
+  // Account Xtream: solo i canali in diretta (player_api), non l'intero catalogo m3u_plus con film e serie
+  // (decine di migliaia di voci in più da scaricare, analizzare e tenere in memoria). Ritorna testo M3U.
+  function xtreamParts(url) {
+    var m = /^(https?:\/\/[^?#]+?)\/get\.php\?(.*)$/i.exec(url || '');
+    if (!m) return null;
+    var q = {};
+    m[2].split('&').forEach(function (kv) { var i = kv.indexOf('='); if (i > 0) q[kv.slice(0, i)] = kv.slice(i + 1); });
+    if (!q.username || !q.password) return null;
+    return { srv: m[1], user: q.username, pass: q.password, q: 'username=' + q.username + '&password=' + q.password };
+  }
+
+  function xtreamLive(x) {
+    var api = x.srv + '/player_api.php?' + x.q + '&action=';
+    return Promise.all([
+      download(api + 'get_live_categories', { as: 'text', timeout: API_TIMEOUT, name: 'xt-cat' }),
+      download(api + 'get_live_streams', { as: 'text', timeout: PLAYLIST_TIMEOUT, name: 'xt-live' })
+    ]).then(function (r) {
+      var cats = JSON.parse(r[0].text), streams = JSON.parse(r[1].text);
+      if (!Array.isArray(streams) || !streams.length) throw new Error('nessun canale');
+      var catName = {};
+      (Array.isArray(cats) ? cats : []).forEach(function (c) { if (c) catName[String(c.category_id)] = String(c.category_name || ''); });
+      function v(s) { return String(s == null ? '' : s).replace(/"/g, '\'').replace(/[\r\n]/g, ' '); }
+      var out = ['#EXTM3U'];
+      streams.forEach(function (s) {
+        if (!s || s.stream_id == null) return;
+        out.push('#EXTINF:-1 tvg-id="' + v(s.epg_channel_id) + '" tvg-logo="' + v(s.stream_icon) + '" tvg-chno="' + v(s.num) +
+          '" group-title="' + v(catName[String(s.category_id)]) + '",' + v(s.name));   // il nome può contenere virgole
+        out.push(x.srv + '/live/' + x.user + '/' + x.pass + '/' + encodeURIComponent(String(s.stream_id)) + '.m3u8');
+      });
+      return out.join('\n');
+    });
+  }
+
+  function fetchPlaylist(url, meta) {
+    var x = xtreamParts(url);
+    if (x) return xtreamLive(x).then(function (text) { return { text: text, meta: {} }; }, function () {
+      return download(url, { as: 'text', timeout: PLAYLIST_TIMEOUT, name: 'playlist' });        // fornitore senza API: m3u completo
+    });
+    return download(url, { as: 'text', timeout: PLAYLIST_TIMEOUT, name: 'playlist', meta: meta });
+  }
+
+  // Impronta veloce del testo: per capire se la playlist riscaricata è cambiata senza ridisegnare tutto.
+  function textHash(s) {
+    var h = 0, step = Math.max(1, Math.floor(s.length / 200000));
+    for (var i = 0; i < s.length; i += step) h = (h * 31 + s.charCodeAt(i)) | 0;
+    return s.length + ':' + h;
+  }
+
+  // Avvio: si mostra SUBITO la copia salvata della playlist (se c'è) e la si aggiorna dalla rete in sottofondo.
+  // Prima si aspettava sempre il download completo prima di vedere qualcosa.
   function loadActive() {
     var pl = activePlaylist();
     var token = ++state.loadToken;
@@ -352,27 +441,38 @@
     el.plName.textContent = pl.name;
     setStatus('Caricamento di “' + pl.name + '”…');
     state.channels = []; state.filtered = []; el.grid.innerHTML = '';
-    fetchText(pl.url).then(function (text) {
+    var t0 = Date.now(), cached = null;
+    Cache.get('cache:' + pl.id).then(function (c) {
       if (token !== state.loadToken) return;
-      var list = M3U.parse(text);
-      if (!list.length) throw new Error('la playlist è vuota o non è un file M3U');
-      Store.set('cache:' + pl.id, { t: Date.now(), text: text });
-      setChannels(list);
+      cached = c && c.text ? c : null;
+      if (cached) {
+        var list = M3U.parse(cached.text);
+        if (list.length) { setChannels(list); Diag.since('Playlist dalla copia salvata (' + list.length + ' canali)', t0); }
+      }
+      var t1 = Date.now();
+      return fetchPlaylist(pl.url, cached && cached.meta).then(function (r) {
+        if (token !== state.loadToken) return;
+        if (r.notModified && cached) { cached.t = Date.now(); Cache.set('cache:' + pl.id, cached); return; }
+        var hash = textHash(r.text);
+        if (cached && cached.hash === hash) { cached.t = Date.now(); Cache.set('cache:' + pl.id, cached); return; }
+        var list = M3U.parse(r.text);
+        if (!list.length) throw new Error('la playlist è vuota o non è un file M3U');
+        Diag.since('Playlist scaricata (' + list.length + ' canali, ' + Math.round(r.text.length / 1024) + ' KB)', t1);
+        Cache.set('cache:' + pl.id, { t: Date.now(), text: r.text, hash: hash, meta: r.meta || {} });
+        setChannels(list);
+        if (cached) toast('Playlist aggiornata', 2500);
+      });
     }).catch(function (err) {
       if (token !== state.loadToken) return;
-      var cache = Store.get('cache:' + pl.id, null);
-      if (cache && cache.text) {
-        setChannels(M3U.parse(cache.text));
-        toast('Offline: uso la copia salvata della playlist', 4000);
-      } else {
-        setChannels([]);
-        setStatus('Impossibile caricare la playlist (' + (err && err.message ? err.message : 'errore di rete') + '). Controlla la connessione o l\'URL nelle Impostazioni.', true);
-      }
+      if (cached) { toast('Offline: uso la copia salvata della playlist', 4000); return; }
+      setChannels([]);
+      setStatus('Impossibile caricare la playlist (' + (err && err.message ? err.message : 'errore di rete') + '). Controlla la connessione o l\'URL nelle Impostazioni.', true);
     });
   }
 
   // Prima apertura (o nessuna playlist): tre modi per aggiungere la propria lista.
   function showWelcome() {
+    setTimeout(markBootOk, 0);
     hideHome();
     state.channels = []; state.filtered = []; state.groups = [];
     el.plName.textContent = '';
@@ -870,7 +970,16 @@
     }
   }
 
+  var bootOk = false;
+  function markBootOk(fromTimer) {
+    if (bootOk) return;
+    bootOk = true;
+    if (fromTimer !== true) Diag.since('Avvio fino alla prima schermata utile', Diag.start);
+    if (window.BTV_BUNDLE) { try { localStorage.setItem('bundleOk', window.BTV_BUNDLE.version); } catch (e) { /* ignora */ } }
+  }
+
   function setChannels(list) {
+    setTimeout(markBootOk, 0);   // dopo il disegno: se il disegno stesso fallisce, l'avvio non conta come riuscito
     list.forEach(function (ch, i) {
       ch.num = parseInt(ch.chno, 10) || (i + 1);
       ch.title = cleanName(ch.name);
@@ -931,15 +1040,24 @@
     return new Worker('js/epg-worker.js');
   }
 
-  function parseGuide(bytes, now) {
-    function onMain() { return EPG.parseBytes(bytes, window.pako, now); }
+  // src = { bytes } (byte già scaricati, passati al Worker senza copie) oppure { url } (file locale del download
+  // nativo su Fire TV: lo legge il Worker a pezzi, i byte non passano mai dalla pagina).
+  function parseGuide(src, now) {
+    function onMain() {                                                 // senza Worker (raro): pako si carica solo qui
+      var lib = window.pako ? Promise.resolve() : loadLib('vendor/pako_inflate.min.js');
+      return lib.then(function () {
+        if (src.bytes) return EPG.parseBytes(src.bytes, window.pako, now);
+        return fetch(src.url).then(function (r) { return r.arrayBuffer(); })
+          .then(function (b) { return EPG.parseBytes(new Uint8Array(b), window.pako, now); });
+      });
+    }
     if (epgWorkerBroken || !window.Worker) return Promise.resolve().then(onMain);
     return new Promise(function (resolve, reject) {
       try {
         if (!epgWorker) epgWorker = makeEpgWorker();
       } catch (e) {
         epgWorkerBroken = true;
-        try { resolve(onMain()); } catch (x) { reject(x); }
+        Promise.resolve().then(onMain).then(resolve, reject);
         return;
       }
       var guard = setTimeout(function () {
@@ -947,15 +1065,29 @@
         epgWorker = null;
         reject(new Error('guida troppo lenta da analizzare'));
       }, 90000);
-      epgWorker.onmessage = function (e) { clearTimeout(guard); if (e.data.ok) resolve(e.data.guide); else reject(new Error(e.data.error)); };
+      epgWorker.onmessage = function (e) {
+        clearTimeout(guard);
+        if (e.data.ok) { resolve(e.data.guide); return; }
+        // Il Worker non riesce a leggere il file locale (alcune WebView): lo legge la pagina e glielo passa.
+        if (src.url && /fetch|HTTP|network/i.test(e.data.error || '')) {
+          fetch(src.url).then(function (r) { return r.arrayBuffer(); })
+            .then(function (b) { return parseGuide({ bytes: new Uint8Array(b) }, now); }).then(resolve, reject);
+          return;
+        }
+        reject(new Error(e.data.error));
+      };
       epgWorker.onerror = function (e) {
         clearTimeout(guard);
         if (e && e.preventDefault) e.preventDefault();
         epgWorkerBroken = true; epgWorker = null;
-        try { resolve(onMain()); } catch (x) { reject(x); }
+        Promise.resolve().then(onMain).then(resolve, reject);
       };
-      var buf = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
-      epgWorker.postMessage({ buf: buf, now: now }, [buf]);
+      if (src.bytes) {
+        var bytes = src.bytes, buf = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+        epgWorker.postMessage({ buf: buf, now: now }, [buf]);
+      } else {
+        epgWorker.postMessage({ url: src.url, now: now });
+      }
     });
   }
 
@@ -975,41 +1107,63 @@
     var token = ++state.epgToken;
     var pl = activePlaylist();
     if (!urls.length || !pl) { state.epgLoading = false; clearEpg(); return; }
-
-    var cache = Store.get('epg:' + pl.id, null);
-    if (cache && cache.data && !force) attachGuides([cache.data]);
-    if (!force && cache && Date.now() - cache.t < EPG_MAX_AGE) { state.epgLoading = false; updateEpgLabel(); return; }
-
-    state.epgLoading = true; updateEpgLabel();
-    var guides = [], failed = [], i = 0, now = Date.now();
-    (function next() {
+    var t0 = Date.now();
+    // La copia salvata si legge da IndexedDB senza bloccare l'interfaccia (prima: JSON di più MB letto all'avvio).
+    Cache.get('epg:' + pl.id).then(function (cache) {
       if (token !== state.epgToken) return;
-      if (i >= urls.length) {
-        state.epgLoading = false;
-        if (guides.length) {
-          attachGuides(guides);
-          // Una sola guida in cache (la playlist attiva) per non riempire la memoria della TV.
-          state.playlists.forEach(function (p) { if (p.id !== pl.id) Store.remove('epg:' + p.id); });
-          Store.set('epg:' + pl.id, { t: Date.now(), data: EPG.compact(guides, state.channels) });
-        } else if (!cache) {
-          clearEpg();
+      if (cache && cache.data && !force) { attachGuides([cache.data]); Diag.since('Guida dalla copia salvata', t0); }
+      if (!force && cache && Date.now() - cache.t < EPG_MAX_AGE) { state.epgLoading = false; updateEpgLabel(); return; }
+      state.epgLoading = true; updateEpgLabel();
+      var guides = [], failed = [], i = 0, now = Date.now(), metas = {};
+      // Con una sola fonte (il caso più comune: la guida del fornitore) si chiede al server se è cambiata:
+      // se no, si tiene la copia salvata senza riscaricare decine di MB (solo Fire TV, dove il download è nativo).
+      var oldMeta = urls.length === 1 && cache && cache.data && cache.meta ? cache.meta[urls[0]] : null;
+      (function next() {
+        if (token !== state.epgToken) return;
+        if (i >= urls.length) {
+          state.epgLoading = false;
+          if (guides.length) {
+            attachGuides(guides);
+            Diag.since('Guida scaricata e analizzata (' + guides.length + ' fonti, ' + state.epgCount + ' canali)', t0);
+            // Una sola guida in cache (la playlist attiva) per non riempire la memoria della TV.
+            state.playlists.forEach(function (p) { if (p.id !== pl.id) Cache.remove('epg:' + p.id); });
+            Cache.set('epg:' + pl.id, { t: Date.now(), data: EPG.compact(guides, state.channels), meta: metas });
+          } else if (!cache) {
+            clearEpg();
+          }
+          if (failed.length && force) toast('Guida: ' + failed.length + ' fonte/i non raggiungibili', 3500);
+          updateEpgLabel();
+          return;
         }
-        if (failed.length && force) toast('Guida: ' + failed.length + ' fonte/i non raggiungibili', 3500);
-        updateEpgLabel();
-        return;
-      }
-      var url = urls[i++];
-      httpGet(url, true)
-        .then(function (bytes) { return parseGuide(bytes, now); })
-        .then(function (g) {
-          guides.push(g);
-          // Alleggerimento: se le guide scaricate coprono già quasi tutti i canali, salta le altre fonti
-          // (risparmia download e lavoro alla Fire TV; la guida della playlist viene sempre provata per prima).
-          if (state.channels.length && EPG.match(state.channels, guides) >= state.channels.length * 0.9) i = urls.length;
-        })
-        .catch(function (e) { failed.push(url); if (window.console) console.warn('Guida TV non caricata:', maskUrl(url), e && e.message); })
-        .then(next);
-    })();
+        var url = urls[i++];
+        download(url, { as: nativeDl() ? 'file' : 'bytes', timeout: GUIDE_TIMEOUT, name: 'epg-' + (token % 4) + '-' + i, meta: oldMeta })
+          .then(function (r) {
+            if (r.notModified && cache && cache.data) {                 // non cambiata: resta la copia salvata
+              cache.t = Date.now();
+              Cache.set('epg:' + pl.id, cache);
+              i = urls.length;
+              guides = null;
+              return 'kept';
+            }
+            metas[url] = r.meta || {};
+            return parseGuide(r.fileUrl ? { url: r.fileUrl } : { bytes: r.bytes }, now);
+          })
+          .then(function (g) {
+            if (g === 'kept') {
+              if (token !== state.epgToken) return;
+              state.epgLoading = false; updateEpgLabel();
+              Diag.since('Guida non cambiata sul server: copia salvata', t0);
+              return 'stop';
+            }
+            guides.push(g);
+            // Alleggerimento: se le guide scaricate coprono già quasi tutti i canali, salta le altre fonti
+            // (risparmia download e lavoro alla Fire TV; la guida della playlist viene sempre provata per prima).
+            if (state.channels.length && EPG.match(state.channels, guides) >= state.channels.length * 0.9) i = urls.length;
+          })
+          .catch(function (e) { failed.push(url); if (window.console) console.warn('Guida TV non caricata:', maskUrl(url), e && e.message); })
+          .then(function (x) { if (x !== 'stop') next(); });
+      })();
+    });
   }
 
   function updateEpgLabel() {
@@ -2420,6 +2574,11 @@
   // La TV mostra un codice nuovo a ogni apertura; telefono/PC cifrano con quel codice (js/pair.js) e inviano
   // tramite ntfy.sh. La TV ascolta il canale derivato dal codice e accetta solo messaggi che sa decifrare.
   function openPair() {
+    if (window.Pair && !window.qrcode && !state.qrTried) {               // libreria del QR caricata solo quando serve
+      state.qrTried = true;
+      loadLib('vendor/qrcode.js').then(openPair, openPair);
+      return;
+    }
     if (!window.Pair || !window.qrcode) { toast('Funzione non disponibile su questo dispositivo'); return; }
     closePair();
     var code;
@@ -2662,8 +2821,8 @@
       var id = b.getAttribute('data-id');
       state.playlists = state.playlists.filter(function (p) { return p.id !== id; });
       saveCustomPlaylists();
-      Store.remove('cache:' + id);
-      Store.remove('epg:' + id);
+      Cache.remove('cache:' + id);
+      Cache.remove('epg:' + id);
       if (state.activeId === id) { state.activeId = state.playlists.length ? state.playlists[0].id : ''; Store.set('activePlaylist', state.activeId); loadActive(); }
       renderPlaylists();
       Nav.setRoot(el.screens.settings, null);
@@ -2963,5 +3122,8 @@
   show('browse', el.search);
   loadActive();
   setTimeout(function () { checkUpdate(true); }, 4000);                   // all'avvio
-  if (window.BTV_BUNDLE) { try { localStorage.setItem('bundleOk', window.BTV_BUNDLE.version); } catch (e) { /* ignora */ } }
+  // L'aggiornamento scaricato sulla TV è "riuscito" solo dopo il primo caricamento vero (playlist mostrata o
+  // benvenuto): se si blocca prima, al prossimo avvio boot.js torna da solo alla versione installata.
+  // Rete di sicurezza: dopo 60 s senza errori lo si considera comunque riuscito (es. rete assente all'avvio).
+  setTimeout(function () { markBootOk(true); }, 60000);
 })();
