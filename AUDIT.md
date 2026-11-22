@@ -57,13 +57,32 @@ riproduzione Rai 1 (hls.js) OK, cambio canale OK, lista sopra il video OK (righe
 
 ---
 
+## Ottimizzazioni (22/11/2026, versione 1.10.0)
+
+Analisi completa e correzioni per Fire TV Stick (1 GB) e LG webOS. Test: `npm test` (parser M3U e guida).
+
+| Area | Cosa è cambiato |
+|---|---|
+| Lettore | Caricatore unico per lettore, anteprima e multivisione: ogni tentativo ha il suo tempo limite (prima, dopo un timeout, il secondo metodo poteva restare con la rotella per sempre); il metodo che funziona viene ricordato per server (Fire TV: niente più attesa dei ritentativi di hls.js a ogni cambio canale); ritentativi del manifest brevi; riavvii dopo un blocco con attese crescenti. |
+| Tasti | Nel lettore la prima pressione di frecce/OK apre solo la barra; CH± ravvicinati avviano solo il canale finale; ripetizioni dei tasti tenuti premuti limitate. |
+| Guida TV | Analisi a pezzi mentre si decomprime: mai più il file intero in memoria (prima centinaia di MB per una guida grande); espressioni compilate una volta; copia compatta lineare (prima quadratica); su Fire TV download nativo su file (niente base64), con richiesta condizionale (guida non cambiata = non riscaricata). |
+| Avvio | Si parte dalla copia salvata della playlist e la si aggiorna in sottofondo; copie di playlist e guida in IndexedDB (localStorage si riempiva e faceva cancellare la guida); QR e pako caricati solo quando servono; sulla TV l'aggiornamento conta come riuscito solo dopo il primo caricamento vero. |
+| Rete | Tempi limite: playlist 90 s, guida 180 s, API 30 s. Account Xtream: solo i canali in diretta (player_api), con ripiego sul vecchio m3u. |
+| Liste | Griglia, guida della Home e lista canali "a finestra" (vlist.js): nel DOM solo le righe vicine a quelle visibili; tolto il limite di 3000 canali nella lista sopra il video; guida della Home navigata per indice. |
+| Memoria | Timeshift 3 minuti su TV e Fire TV (prima 5); logo dell'anteprima non più ricreato ogni 30 s; aggiornamenti della Home non più doppi. |
+| Diagnostica | Impostazioni → Diagnostica: tempi di avvio, playlist, guida, cambio canale e memoria. `toolsuild-apk.ps1 -Debug` crea `distBTV-debug.apk` con debug della WebView per chrome://inspect (da non pubblicare). |
+
+Non ancora misurato sui dispositivi reali (Fire Stick, LG): vanno confrontati i numeri della Diagnostica prima/dopo.
+
+---
+
 ## 2. Da approvare
 
 | Sev. | Rischio concreto | Fix proposto | Cosa cambierebbe per te |
 |---|---|---|---|
 | **Alta** | L'app **"Auto Dev Token Refresh"** (webOS Homebrew, autore "LucifersCircle") invia il token della modalità sviluppatore della TV a un **server di terzi** (`lg.pirate.vodka`), che poi lo usa da solo. Chi gestisce quel server ottiene una credenziale della tua TV ed è un punto unico di guasto. | Non renderla obbligatoria. Alternativa: rinnovo automatico fatto da **un'attività GitHub nostra** (una volta al giorno chiama direttamente LG, il token sta in un segreto cifrato di GitHub; nessun terzo). | Una configurazione iniziale con la TV accesa (leggo il token dalla TV una volta); poi niente da ricordare. |
 | Media | Pubblicare chiede ogni volta la password delle chiavi di firma (scomodo). | Password **casuale generata dal PC** e salvata cifrata con il tuo account Windows (DPAPI): la pubblicazione non chiede più nulla. Più una copia di sicurezza esportabile. | Non digiti più password per pubblicare. Le chiavi restano protette dal tuo account Windows; se cambi PC serve la copia di sicurezza. |
-| Media | Download di playlist e guida **senza timeout**: un server che non risponde lascia l'app in attesa (la guida resta "in caricamento"). | Timeout di 90 s per la playlist e 180 s per la guida. | Un download lentissimo (oltre quei tempi) verrebbe interrotto e riprovato dopo; oggi aspetterebbe all'infinito. |
+| ~~Media~~ (fatto in 1.10.0) | Download di playlist e guida **senza timeout**: un server che non risponde lascia l'app in attesa (la guida resta "in caricamento"). | Timeout di 90 s per la playlist e 180 s per la guida. | Un download lentissimo (oltre quei tempi) verrebbe interrotto e riprovato dopo; oggi aspetterebbe all'infinito. |
 | Bassa | Credenziali (URL playlist, utente/password Xtream) salvate **in chiaro** nella memoria dell'app. Su Fire TV la memoria è privata dell'app (backup disattivato, APK release non ispezionabile); su LG in modalità sviluppatore è raggiungibile da chi ha la chiave SSH della TV. | Nessun fix efficace senza password all'avvio (una cifratura con chiave dentro l'app non protegge davvero). | Servirebbe un PIN all'avvio: un passaggio in più. Consiglio di **non** farlo. |
 | Bassa | `pako` 3 (nuova major) | Non aggiornare: la 3 non funziona sui browser delle TV vecchie; la 2.2 non ha vulnerabilità note. | Nessuno (resta così). |
 
