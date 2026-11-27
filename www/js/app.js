@@ -3,18 +3,54 @@
   'use strict';
 
   // ---------------------------------------------------------------- Config
-  var APP_VERSION = '1.10.0'; // aumentala a ogni aggiornamento: in Impostazioni vedi quale versione sta girando
+  var APP_VERSION = '1.11.0'; // aumentala a ogni aggiornamento: in Impostazioni vedi quale versione sta girando
   var PRESETS = [];      // nessuna lista precaricata: solo quelle che aggiungi tu
   // Guide TV gratuite in formato XMLTV (si possono disattivare o aggiungerne altre nelle Impostazioni).
   var DEFAULT_EPG = [];  // nessuna guida precaricata: quella della playlist + quelle che aggiungi tu
   var EPG_MAX_AGE = 6 * 3600e3; // ogni quanto riscaricare la guida
-  // TV e Fire TV hanno poca memoria: lì si usano valori più leggeri (sul PC restano quelli pieni).
-  var LOW_POWER = detectPlatform() !== 'web';
+  // ---------------------------------------------------------------- Livello di prestazioni
+  // 0 = Leggero, 1 = Normale, 2 = Completo. Deciso dal dispositivo (memoria, processori, fluidità misurata),
+  // non dalla marca, e sempre PRUDENTE: nel dubbio un livello sotto. Si sale al massimo di un livello per avvio,
+  // solo se l'avvio precedente è andato liscio; se durante l'uso compaiono scatti, al prossimo avvio si scende.
+  // Si può forzare in Impostazioni → Prestazioni. Le soglie sono provvisorie: da regolare con i numeri della Diagnostica.
+  var PERF = (function () {
+    var plat = detectPlatform();
+    var mem = +navigator.deviceMemory || 0, cores = +navigator.hardwareConcurrency || 0;
+    var saved = Store.get('perf', null) || {};
+    var mode = Store.get('perfMode', 'auto');
+    // Livello massimo che le caratteristiche permettono (soglie prudenti).
+    var spec;
+    if (plat === 'web') spec = 2;                                   // PC di sviluppo
+    else if (mem >= 2 && cores >= 4) spec = 2;                      // es. Fire TV Stick 4K (2 GB, 4 core)
+    else if (mem >= 2) spec = 1;
+    else if (!mem && cores >= 4 && plat === 'android') spec = 1;    // memoria non dichiarata: al massimo Normale
+    else spec = 0;                                                  // 1 GB o meno, oppure TV senza dati certi
+    if (saved.janky) spec = Math.max(0, spec - 1);                  // la prova di fluidità ha visto scatti
+    if (typeof saved.cap === 'number') spec = Math.min(spec, saved.cap);   // scatti visti in passato: tetto fisso
+    var tier;
+    if (plat === 'web') tier = 2;
+    else if (saved.tier === undefined) tier = 0;                    // primo avvio: si parte dal più leggero
+    else if (saved.slow) tier = Math.max(0, saved.tier - 1);        // scatti durante l'uso: un livello sotto
+    else tier = Math.min(spec, saved.tier + 1);                     // altrimenti si sale di uno, fino al massimo
+    var auto = tier;
+    if (mode === '0' || mode === '1' || mode === '2') tier = +mode;
+    var store = { tier: auto, spec: spec, janky: !!saved.janky };
+    if (typeof saved.cap === 'number') store.cap = saved.cap;
+    if (plat !== 'web') Store.set('perf', store);
+    return { tier: tier, auto: auto, spec: spec, mode: mode, mem: mem, cores: cores, web: plat === 'web' };
+  })();
+  var PERF_NAMES = ['Leggero', 'Normale', 'Completo'];
+  function byTier(a, b, c, web) { return PERF.web && web !== undefined ? web : [a, b, c][PERF.tier]; }
+
+  // Effetti grafici pieni (ombre, transizioni) solo dal livello Completo.
+  var LOW_POWER = PERF.tier < 2 && !PERF.web;
   var STREAM_TIMEOUT = 25000;  // ms prima di dichiarare un canale non disponibile
   var OSD_TIME = 5000;
-  // "torna indietro"/pausa: 3 min su TV e Fire TV (5 min in FHD occupavano 150-250 MB, troppo con 1 GB), 10 sul PC
-  var TIMESHIFT_SECONDS = LOW_POWER ? 180 : 600;
-  var BUFFER_BYTES = (LOW_POWER ? 60 : 150) * 1000 * 1000;
+  // "torna indietro"/pausa: 2 / 3 / 5 minuti (con 1 GB di memoria 5 minuti in FHD erano troppi), 10 sul PC
+  var TIMESHIFT_SECONDS = byTier(120, 180, 300, 600);
+  var BUFFER_BYTES = byTier(40, 60, 100, 150) * 1000 * 1000;
+  var LIST_BUFFER = byTier(2, 3, 5);                // righe in più tenute nel DOM attorno a quelle visibili
+  var EPG_FUTURE = byTier(14, 26, 26) * 3600e3;     // ore di guida futura tenute in memoria
   var LIVE_AHEAD = 30;                             // secondi scaricati in anticipo mentre si guarda
   var DEAD_TTL = 12 * 3600e3;  // un canale che non va resta segnato per 12 ore (poi si riprova)
   var SEEK_STEP = 30;          // secondi per ogni pressione di ◀ / ▶ / ⏪ / ⏩
@@ -106,10 +142,10 @@
 
   // Elenchi lunghi "a finestra" (vlist.js): nel DOM solo le righe vicine a quelle visibili.
   var gridV = new VList(el.grid, { count: function () { return state.filtered.length; },
-    make: function (i) { return makeCard(state.filtered[i], i); }, cols: 'auto', buffer: 3 });
-  var hgV = new VList(el.hgList, { count: function () { return (state.hgAll || []).length; }, make: makeGuideRow, buffer: 5 });
+    make: function (i) { return makeCard(state.filtered[i], i); }, cols: 'auto', buffer: LIST_BUFFER });
+  var hgV = new VList(el.hgList, { count: function () { return (state.hgAll || []).length; }, make: makeGuideRow, buffer: LIST_BUFFER + 2 });
   var pickV = new VList(el.pickerList, { count: function () { return state.picker ? state.picker.list.length : 0; },
-    make: function (i) { return makePickerRow(i); }, buffer: 6 });
+    make: function (i) { return makePickerRow(i); }, buffer: LIST_BUFFER + 3 });
 
   // ---------------------------------------------------------------- Piattaforma
   function detectPlatform() {
@@ -1045,9 +1081,9 @@
     function onMain() {                                                 // senza Worker (raro): pako si carica solo qui
       var lib = window.pako ? Promise.resolve() : loadLib('vendor/pako_inflate.min.js');
       return lib.then(function () {
-        if (src.bytes) return EPG.parseBytes(src.bytes, window.pako, now);
+        if (src.bytes) return EPG.parseBytes(src.bytes, window.pako, now, EPG_FUTURE);
         return fetch(src.url).then(function (r) { return r.arrayBuffer(); })
-          .then(function (b) { return EPG.parseBytes(new Uint8Array(b), window.pako, now); });
+          .then(function (b) { return EPG.parseBytes(new Uint8Array(b), window.pako, now, EPG_FUTURE); });
       });
     }
     if (epgWorkerBroken || !window.Worker) return Promise.resolve().then(onMain);
@@ -1083,9 +1119,9 @@
       };
       if (src.bytes) {
         var bytes = src.bytes, buf = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
-        epgWorker.postMessage({ buf: buf, now: now }, [buf]);
+        epgWorker.postMessage({ buf: buf, now: now, future: EPG_FUTURE }, [buf]);
       } else {
-        epgWorker.postMessage({ url: src.url, now: now });
+        epgWorker.postMessage({ url: src.url, now: now, future: EPG_FUTURE });
       }
     });
   }
@@ -2105,6 +2141,8 @@
     setIc(el.optResume, 'play', 'Anteprima in Home: ' + (state.resumeLast ? 'ultimo canale' : 'spenta'));
     setIc(el.optUpd, 'refresh', 'Controllo aggiornamenti: ' + (state.updCheck ? 'attivo' : 'disattivato'));
     setIc(el.optDead, 'warning', 'Canali non funzionanti: ' + (state.hideDead ? 'nascosti' : 'visibili (attenuati)'));
+    var pm = Store.get('perfMode', 'auto');
+    setIc($('opt-perf'), 'quality', 'Prestazioni: ' + (pm === 'auto' ? 'automatiche (' + PERF_NAMES[PERF.auto] + ')' : PERF_NAMES[+pm]));
   }
 
   function updateMultiPrefLabel() {
@@ -2753,6 +2791,10 @@
       var box = $('diag');
       if (!box.classList.contains('hidden')) { box.classList.add('hidden'); return; }
       var lines = ['BTV ' + APP_VERSION + ' · ' + platform + ' · aperta da ' + Math.round((Date.now() - Diag.start) / 60000) + ' min'];
+      var ps = Store.get('perf', {}) || {};
+      lines.push('Prestazioni: ' + PERF_NAMES[PERF.tier] + (PERF.mode === 'auto' ? ' (automatiche)' : ' (scelte a mano; automatiche: ' + PERF_NAMES[PERF.auto] + ')') +
+        ' · massimo per questo dispositivo: ' + PERF_NAMES[PERF.spec] + ' · memoria dichiarata: ' + (PERF.mem ? PERF.mem + ' GB' : 'n.d.') +
+        ' · processori: ' + (PERF.cores || 'n.d.') + ' · prova fluidità: ' + (ps.frameTest || 'non ancora') + ' · scatti durante l\'uso: ' + perfSlowCount);
       var mem = window.performance && performance.memory;
       if (mem) lines.push('Memoria JavaScript: ' + Math.round(mem.usedJSHeapSize / 1048576) + ' MB (limite ' + Math.round(mem.jsHeapSizeLimit / 1048576) + ' MB)');
       lines.push('Elementi nella pagina: ' + document.getElementsByTagName('*').length + ' · canali: ' + state.channels.length +
@@ -2832,6 +2874,16 @@
       Store.remove('webBundle');
       toast('Torno alla versione installata: riavvio BTV…', 3000);
       setTimeout(function () { location.reload(); }, 1500);
+    },
+    // Automatiche → Leggero → Normale → Completo → Automatiche. Si applica riavviando BTV.
+    cyclePerf: function () {
+      var order = ['auto', '0', '1', '2'], cur = Store.get('perfMode', 'auto');
+      var next = order[(order.indexOf(cur) + 1) % order.length];
+      Store.set('perfMode', next);
+      updateOptLabels();
+      clearTimeout(state.timers.perf);
+      state.timers.perf = setTimeout(function () { toast('Riavvio BTV con le nuove prestazioni…', 2500); setTimeout(function () { location.reload(); }, 1200); }, 2500);
+      toast('Prestazioni: ' + (next === 'auto' ? 'automatiche' : PERF_NAMES[+next]) + ' · si applicano tra poco (premi ancora per cambiare)', 2500);
     },
     toggleUpdCheck: function () {
       state.updCheck = !state.updCheck; Store.set('updCheck', state.updCheck); updateOptLabels();
@@ -2986,6 +3038,47 @@
         return false;
     }
     return false;
+  }
+
+  // ---------------------------------------------------------------- Fluidità (per il livello di prestazioni)
+  // 1) Prova breve 8 s dopo l'avvio: per 1,5 s si contano i fotogrammi in ritardo (> 50 ms). Se sono troppi, il
+  //    massimo livello per questo dispositivo scende di uno dal prossimo avvio.
+  // 2) Durante l'uso (fuori dal lettore): se tra la pressione di un tasto e il disegno passano più di 300 ms per
+  //    5 volte, dal prossimo avvio si scende di un livello. Mai si sale per questo: solo si scende (prudenza).
+  var perfSlowCount = 0, perfSlowSaved = false;
+  function perfSave(patch) {
+    var ps = Store.get('perf', {}) || {};
+    for (var k in patch) ps[k] = patch[k];
+    Store.set('perf', ps);
+  }
+  function nextFrame(fn) { (window.requestAnimationFrame || function (f) { setTimeout(f, 16); })(fn); }
+  if (!PERF.web) {
+    setTimeout(function () {
+      if (background || state.screen === 'player' || !window.requestAnimationFrame) return;
+      var last = 0, frames = 0, late = 0, end = Date.now() + 1500;
+      (function tick(t) {
+        if (last) { frames++; if (t - last > 50) late++; }
+        last = t;
+        if (Date.now() < end) { nextFrame(tick); return; }
+        var janky = frames > 10 && late / frames > 0.15;
+        perfSave({ janky: janky, frameTest: late + ' in ritardo su ' + frames });
+        Diag.time('Prova di fluidità: fotogrammi in ritardo su ' + frames, late);
+      })(0);
+    }, 8000);
+    document.addEventListener('keydown', function (e) {
+      if (e.repeat || perfSlowSaved || state.screen === 'player' || Date.now() - Diag.start < 20000) return;
+      var t0 = Date.now();
+      nextFrame(function () {
+        nextFrame(function () {
+          var d = Date.now() - t0;
+          if (d <= 300) return;
+          perfSlowCount++;
+          Diag.time('Tasto lento a rispondere', d);
+          // Scende di un livello e non risale più da solo (niente su e giù tra due livelli).
+          if (perfSlowCount >= 5 && PERF.mode === 'auto') { perfSlowSaved = true; perfSave({ slow: true, cap: Math.max(0, PERF.tier - 1) }); }
+        });
+      });
+    }, true);
   }
 
   // ---------------------------------------------------------------- Eventi

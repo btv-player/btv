@@ -9,8 +9,8 @@ self.onmessage = function (e) {
   function done(guide) { self.postMessage({ ok: true, guide: guide }); }
   function fail(err) { self.postMessage({ ok: false, error: String(err && err.message || err) }); }
   try {
-    if (d.buf) { done(EPG.parseBytes(new Uint8Array(d.buf), pako, d.now)); return; }
-    var feeder = new EPG.Feeder(pako, d.now);
+    if (d.buf) { done(EPG.parseBytes(new Uint8Array(d.buf), pako, d.now, d.future)); return; }
+    var feeder = new EPG.Feeder(pako, d.now, d.future);
     fetch(d.url).then(function (r) {
       if (!r.ok) throw new Error('HTTP ' + r.status);
       if (!r.body || !r.body.getReader) {

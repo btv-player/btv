@@ -95,9 +95,10 @@ var EPG = (function () {
   var KEEP_TAIL = 16;          // fine del blocco che potrebbe contenere l'inizio spezzato di un tag ("<progr")
   var MAX_PENDING = 2 * 1024 * 1024;   // un elemento più lungo di così è malformato: lo si salta
 
-  function Parser(now) {
+  // future: ms di guida futura da tenere (facoltativo; i dispositivi leggeri ne tengono meno).
+  function Parser(now, future) {
     now = now || Date.now();
-    this.from = now - PAST; this.to = now + FUTURE;
+    this.from = now - PAST; this.to = now + (future || FUTURE);
     this.channels = {}; this.progs = {};
     this.buf = ''; this.broken = false;
   }
@@ -254,8 +255,8 @@ var EPG = (function () {
   var MAX_XML = 160 * 1024 * 1024;
   var SLICE = 1024 * 1024;
 
-  function Feeder(pk, now) {
-    this.pk = pk; this.parser = new Parser(now); this.total = 0; this.inf = null; this.gz = null;
+  function Feeder(pk, now, future) {
+    this.pk = pk; this.parser = new Parser(now, future); this.total = 0; this.inf = null; this.gz = null;
     this.dec = new TextDecoder('utf-8');
   }
   Feeder.prototype.text = function (bytes) {
@@ -288,8 +289,8 @@ var EPG = (function () {
   };
 
   // Tutto il file in un colpo (byte già scaricati): analisi comunque a blocchi.
-  function parseBytes(bytes, pk, now) {
-    var f = new Feeder(pk, now);
+  function parseBytes(bytes, pk, now, future) {
+    var f = new Feeder(pk, now, future);
     f.push(bytes, true);
     return f.finish();
   }
