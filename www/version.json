@@ -1,11 +1,11 @@
 {
-    "version":  "1.12.7",
+    "version":  "1.12.8",
     "apk":  {
-                "url":  "https://github.com/btv-player/btv/releases/download/v1.12.7/BTV.apk",
-                "sha256":  "811a7ebd9e67a3b7ee24750ff2e1e64d603f2ea94325889433658dd35bddbf8f"
+                "url":  "https://github.com/btv-player/btv/releases/download/v1.12.8/BTV.apk",
+                "sha256":  "c28721da7176e1988297310abacf25a4941c5c5001b3d07d4237ba806c651b5a"
             },
     "web":  {
-                "url":  "https://btv-player.github.io/btv/web/btv-1.12.7.json",
-                "sig":  "8RO4DnXOeN4ezyLXqks+22OgZlyY4a72roqxhkiZdO0wkxbsXR8eYLMKH0tVkvzsoxRxYLZ+OGFkcF+2NYLLAg=="
+                "url":  "https://btv-player.github.io/btv/web/btv-1.12.8.json",
+                "sig":  "29mx4h49t08pN0+jZKjkLmbbhqBdmP6wY7PPwHS/IKQg8aJzOmStDCl2JBDd766tRiIf6Q2tI4Qit+8HrgtTBQ=="
             }
 }
