@@ -3,7 +3,7 @@
   'use strict';
 
   // ---------------------------------------------------------------- Config
-  var APP_VERSION = '1.11.0'; // aumentala a ogni aggiornamento: in Impostazioni vedi quale versione sta girando
+  var APP_VERSION = '1.12.0'; // aumentala a ogni aggiornamento: in Impostazioni vedi quale versione sta girando
   var PRESETS = [];      // nessuna lista precaricata: solo quelle che aggiungi tu
   // Guide TV gratuite in formato XMLTV (si possono disattivare o aggiungerne altre nelle Impostazioni).
   var DEFAULT_EPG = [];  // nessuna guida precaricata: quella della playlist + quelle che aggiungi tu
@@ -465,8 +465,12 @@
     });
   }
 
-  function fetchPlaylist(url, meta) {
-    var x = xtreamParts(url);
+  // Account Xtream: aggiunto con utente e password (o, per le playlist salvate prima della 1.12, un indirizzo get.php).
+  // Una playlist aggiunta come M3U resta M3U: si scarica così com'è.
+  function isXtream(pl) { return !!pl && (pl.type === 'xtream' || (!pl.type && !!xtreamParts(pl.url))); }
+
+  function fetchPlaylist(pl, meta) {
+    var url = pl.url, x = isXtream(pl) ? xtreamParts(url) : null;
     if (x) return xtreamLive(x).then(function (text) { return { text: text, meta: {} }; }, function () {
       return download(url, { as: 'text', timeout: PLAYLIST_TIMEOUT, name: 'playlist' });        // fornitore senza API: m3u completo
     });
@@ -499,7 +503,7 @@
         if (list.length) { setChannels(list); Diag.since('Playlist dalla copia salvata (' + list.length + ' canali)', t0); }
       }
       var t1 = Date.now();
-      return fetchPlaylist(pl.url, cached && cached.meta).then(function (r) {
+      return fetchPlaylist(pl, cached && cached.meta).then(function (r) {
         if (token !== state.loadToken) return;
         if (r.notModified && cached) { cached.t = Date.now(); Cache.set('cache:' + pl.id, cached); return; }
         var hash = textHash(r.text);
@@ -554,7 +558,7 @@
     if (!srv || !user || !pass) { toast('Servono indirizzo del server, nome utente e password'); return null; }
     var q = 'username=' + encodeURIComponent(user) + '&password=' + encodeURIComponent(pass);
     var url = srv + '/get.php?' + q + '&type=m3u_plus&output=m3u8';
-    var p = addPlaylistUrl(name || ('Account ' + srv.replace(/^https?:\/\//, '')), url);
+    var p = addPlaylistUrl(name || ('Account ' + srv.replace(/^https?:\/\//, '')), url, 'xtream');
     // la guida del fornitore (la playlist m3u_plus di solito la indica già: così è sicura)
     addEpgUrl('Guida del fornitore', srv + '/xmltv.php?' + q);
     // verifica delle credenziali: avvisa se il fornitore le rifiuta (la playlist resta, si può eliminare)
@@ -1015,6 +1019,13 @@
 
   function setChannels(list) {
     setTimeout(markBootOk, 0);   // dopo il disegno: se il disegno stesso fallisce, l'avvio non conta come riuscito
+    // Film ed episodi di una playlist M3U vanno in "Film e serie", non tra i canali (né nella guida o nei numeri).
+    var live = [], vod = [];
+    list.forEach(function (ch) { (isVodUrl(ch.url) ? vod : live).push(ch); });
+    live.epgUrls = list.epgUrls;
+    list = live;
+    state.vodM3u = vod;
+    state.vod = null;                                                     // si ricomincia dalla radice di Film e serie
     list.forEach(function (ch, i) {
       ch.num = parseInt(ch.chno, 10) || (i + 1);
       ch.title = cleanName(ch.name);
@@ -1025,7 +1036,7 @@
     list.forEach(function (ch) { ch.groups.forEach(function (g) { counts[g] = (counts[g] || 0) + 1; }); });
     state.groups = Object.keys(counts).sort(function (a, b) { return a.localeCompare(b); })
       .map(function (g) { return { id: g, name: g, count: counts[g] }; });
-    if (state.group !== '__all' && state.group !== '__fav' && state.group !== '__home' && !counts[state.group]) state.group = '__home';
+    if (state.group !== '__all' && state.group !== '__fav' && state.group !== '__home' && !(state.group === '__vod' && hasVod()) && !counts[state.group]) state.group = '__home';
     renderGroups();
     applyFilter();
     if (state.screen === 'browse') {
@@ -1244,7 +1255,7 @@
   function refreshEpgViews(fromTimer) {
     var now = Date.now();
     if (fromTimer !== true || state.screen === 'browse') {
-      gridV.forEach(function (card, i) { if (state.filtered[i]) fillCardEpg(card, state.filtered[i], now); });
+      gridV.forEach(function (card, i) { if (state.filtered[i] && !state.filtered[i].vod) fillCardEpg(card, state.filtered[i], now); });
     }
     if (state.screen === 'player' && osdVisible()) fillOsdEpg();
     if (state.guide) renderGuide(false);
@@ -1339,7 +1350,8 @@
       { id: '__home', name: 'Home', icon: 'home', count: '' },
       { id: '__fav', name: 'Preferiti', icon: 'starf', count: favCount() },
       { id: '__all', name: 'Tutti i canali', icon: 'tv', count: state.channels.length }
-    ].concat(state.groups);
+    ].concat(hasVod() ? [{ id: '__vod', name: 'Film e serie', icon: 'film', count: state.vodM3u && state.vodM3u.length ? state.vodM3u.length : '' }] : [])
+      .concat(state.groups);
     items.forEach(function (g) {
       var b = document.createElement('div');
       b.className = 'group focusable' + (g.icon ? ' special' : '') + (g.id === state.group ? ' active' : '');
@@ -1370,6 +1382,7 @@
     if (!activePlaylist()) { showWelcome(); return; }   // nessuna playlist: resta il benvenuto
     if (state.group === '__home' && !state.query) { showHome(); return; }
     hideHome();
+    if (state.group === '__vod') { vodRender(); return; }
     var q = state.query.toLowerCase();
     var g = state.group;
     state.filtered = (g === '__fav' ? favChannels() : state.channels).filter(function (ch) {
@@ -1390,6 +1403,7 @@
   }
 
   function makeCard(ch, i) {
+    if (ch.vod) return makeVodCard(ch, i);
     var d = document.createElement('div');
     d.className = 'card focusable' + (state.favorites[ch.url] ? ' fav' : '') + (state.dead[ch.url] ? ' dead' : '');
     d.setAttribute('data-idx', i);
@@ -1405,8 +1419,30 @@
     return d;
   }
 
+  // Impostazioni: su/giù vanno sempre alla riga successiva (elementi alla stessa altezza = una riga), scegliendo
+  // l'elemento più vicino in orizzontale. Prima la ricerca geometrica preferiva elementi allineati più lontani e
+  // saltava le righe con i pulsanti a destra (Usa / Elimina di playlist e guide).
+  function rowNav(root, from, dir) {
+    var items = Array.prototype.filter.call(root.querySelectorAll('.focusable'), function (e) { return e.offsetParent !== null; });
+    var fr = from.getBoundingClientRect(), fc = (fr.left + fr.right) / 2;
+    var best = null, bestRow = dir === 'down' ? Infinity : -Infinity, bestDx = Infinity;
+    items.forEach(function (e) {
+      if (e === from) return;
+      var r = e.getBoundingClientRect();
+      if (!r.width || !r.height) return;
+      var top = Math.round(r.top);
+      if (dir === 'down' ? r.top < fr.bottom - 4 : r.bottom > fr.top + 4) return;
+      var dx = Math.abs((r.left + r.right) / 2 - fc);
+      var closerRow = dir === 'down' ? top < bestRow - 6 : top > bestRow + 6;
+      var sameRow = Math.abs(top - bestRow) <= 6;
+      if (closerRow || (sameRow && dx < bestDx)) { best = e; bestRow = top; bestDx = dx; }
+    });
+    return best;
+  }
+
   // Regole di navigazione specifiche dell'elenco (più veloci e prevedibili della geometria).
   function customNav(from, dir) {
+    if (state.screen === 'settings' && (dir === 'up' || dir === 'down')) return rowNav(el.screens.settings, from, dir) || false;
     if (state.screen === 'browse') {
       if (from.classList.contains('card')) {
         var i = +from.getAttribute('data-idx');
@@ -1471,6 +1507,7 @@
 
   function toggleFav(ch) {
     if (!ch) return;
+    if (ch.vod) { toast('I preferiti sono per i canali in diretta'); return; }
     if (state.favorites[ch.url]) {
       delete state.favorites[ch.url];
       saveFavOrder(state.favOrder.filter(function (u) { return u !== ch.url; }));
@@ -1517,6 +1554,15 @@
     show('settings');
   }
 
+  function closeDiag() { state.diagOpen = false; $('diag-panel').classList.add('hidden'); }
+
+  function showAddTab(t) {
+    $('add-xt').classList.toggle('hidden', t !== 'xt');
+    $('add-m3u').classList.toggle('hidden', t !== 'm3u');
+    $('tab-xt').classList.toggle('active', t === 'xt');
+    $('tab-m3u').classList.toggle('active', t === 'm3u');
+  }
+
   function closeSettings() {
     show('browse', state.returnFocus);
   }
@@ -1528,7 +1574,7 @@
       row.className = 'pl-row' + (p.id === state.activeId ? ' current' : '');
       var info = document.createElement('div'); info.className = 'pl-info';
       var n = document.createElement('div'); n.className = 'pl-name'; n.textContent = p.name + (p.id === state.activeId ? '  ·  in uso' : '');
-      var u = document.createElement('div'); u.className = 'pl-url'; u.textContent = p.preset ? p.url : maskUrl(p.url);
+      var u = document.createElement('div'); u.className = 'pl-url'; u.textContent = (isXtream(p) ? 'Account Xtream · ' : 'Playlist M3U · ') + (p.preset ? p.url : maskUrl(p.url));
       info.appendChild(n); info.appendChild(u);
       row.appendChild(info);
       var use = document.createElement('button');
@@ -1546,6 +1592,216 @@
     });
   }
 
+  // ---------------------------------------------------------------- Film e serie (on demand)
+  // Account Xtream: categorie, film e serie si chiedono al fornitore solo quando si aprono (una categoria alla volta:
+  // niente cataloghi da decine di migliaia di titoli in memoria). Playlist M3U: i film e gli episodi trovati nella
+  // playlist (indirizzi /movie/, /series/ o file video) sono raggruppati per categoria.
+  // La griglia mostra un livello alla volta (cartelle → titoli → stagioni → episodi); Indietro risale.
+  function isVodUrl(u) {
+    return /\/(movie|series)\/[^\/?#]+\/[^\/?#]+\/[^\/?#]+$/i.test(u || '') || /\.(mp4|mkv|avi|mov|m4v|wmv|flv|webm|mpg|mpeg)(\?|$)/i.test(u || '');
+  }
+
+  function hasVod() {
+    var pl = activePlaylist();
+    return !!pl && (isXtream(pl) || !!(state.vodM3u && state.vodM3u.length));
+  }
+
+  function vodEntry(o) { o.vod = true; o.name = o.title; o.num = ''; if (!o.groups) o.groups = []; return o; }
+
+  function xtApi(action) {
+    var x = xtreamParts(activePlaylist().url);
+    return httpGet(x.srv + '/player_api.php?' + x.q + '&action=' + action).then(function (t) {
+      var j = JSON.parse(t);
+      if (j && j.user_info && String(j.user_info.auth) === '0') throw new Error('accesso rifiutato');
+      return j;
+    });
+  }
+
+  function xtExt(e, def) { var x = String(e || def).replace(/[^a-z0-9]/gi, ''); return x || def; }
+
+  function vodRootEntries() {
+    var pl = activePlaylist();
+    // Account Xtream con canali dall'API: film e serie dall'API. Se l'API non andava (playlist completa), dalla playlist.
+    if (isXtream(pl) && !(state.vodM3u && state.vodM3u.length)) {
+      return [
+        vodEntry({ kind: 'folder', title: 'Film', sub: 'Per categoria', icon: 'film', load: function () { return xtCats('vod'); } }),
+        vodEntry({ kind: 'folder', title: 'Serie TV', sub: 'Per categoria', icon: 'film', load: function () { return xtCats('series'); } })
+      ];
+    }
+    var byGroup = {}, order = [];
+    (state.vodM3u || []).forEach(function (ch) {
+      var g = ch.group || 'Altri';
+      if (!byGroup[g]) { byGroup[g] = []; order.push(g); }
+      byGroup[g].push(ch);
+    });
+    order.sort(function (a, b) { return a.localeCompare(b); });
+    return order.map(function (g) {
+      return vodEntry({ kind: 'folder', title: g, sub: byGroup[g].length + (byGroup[g].length === 1 ? ' titolo' : ' titoli'), load: function () {
+        return Promise.resolve(byGroup[g].map(function (ch) {
+          return vodEntry({ kind: 'play', title: cleanName(ch.name), logo: ch.logo, url: ch.url, groups: [g] });
+        }));
+      } });
+    });
+  }
+
+  function xtCats(type) {
+    return xtApi(type === 'vod' ? 'get_vod_categories' : 'get_series_categories').then(function (cats) {
+      if (!Array.isArray(cats) || !cats.length) throw new Error('nessuna categoria');
+      return cats.map(function (c) {
+        var id = String(c.category_id), name = String(c.category_name || 'Altro');
+        return vodEntry({ kind: 'folder', title: name, sub: type === 'vod' ? 'Film' : 'Serie TV', load: function () { return xtList(type, id, name); } });
+      });
+    });
+  }
+
+  function xtList(type, catId, catName) {
+    var x = xtreamParts(activePlaylist().url);
+    var action = (type === 'vod' ? 'get_vod_streams' : 'get_series') + '&category_id=' + encodeURIComponent(catId);
+    return xtApi(action).then(function (list) {
+      if (!Array.isArray(list)) throw new Error('risposta non valida');
+      return list.map(function (it) {
+        var year = it.year || (it.releaseDate || it.releasedate || '').slice(0, 4);
+        var sub = [year, it.rating ? '★ ' + it.rating : ''].filter(Boolean).join('  ·  ');
+        if (type === 'vod') {
+          return vodEntry({ kind: 'play', title: String(it.name || 'Senza titolo'), logo: it.stream_icon || '', sub: sub, groups: [catName],
+            url: x.srv + '/movie/' + x.user + '/' + x.pass + '/' + encodeURIComponent(String(it.stream_id)) + '.' + xtExt(it.container_extension, 'mp4') });
+        }
+        var sid = String(it.series_id), title = String(it.name || 'Senza titolo'), cover = it.cover || '';
+        return vodEntry({ kind: 'folder', title: title, logo: cover, sub: sub || 'Serie', load: function () { return xtSeries(sid, title, cover); } });
+      });
+    });
+  }
+
+  function xtSeries(sid, title, cover) {
+    var x = xtreamParts(activePlaylist().url);
+    return xtApi('get_series_info&series_id=' + encodeURIComponent(sid)).then(function (info) {
+      var eps = info && info.episodes ? info.episodes : {};
+      var seasons = Object.keys(eps).sort(function (a, b) { return (+a || 0) - (+b || 0); });
+      if (!seasons.length) throw new Error('nessun episodio');
+      function episodes(sn) {
+        return (eps[sn] || []).map(function (e) {
+          var n = e.episode_num ? 'E' + e.episode_num + ' · ' : '';
+          var img = e.info && (e.info.movie_image || e.info.cover_big) || cover;
+          var dur = e.info && e.info.duration ? e.info.duration : '';
+          return vodEntry({ kind: 'play', ep: true, title: n + String(e.title || 'Episodio'), logo: img, sub: dur, groups: [title + ' · Stagione ' + sn],
+            url: x.srv + '/series/' + x.user + '/' + x.pass + '/' + encodeURIComponent(String(e.id)) + '.' + xtExt(e.container_extension, 'mp4') });
+        });
+      }
+      if (seasons.length === 1) return episodes(seasons[0]);
+      return seasons.map(function (sn) {
+        return vodEntry({ kind: 'folder', title: 'Stagione ' + sn, logo: cover, sub: (eps[sn] || []).length + ' episodi',
+          load: function () { return Promise.resolve(episodes(sn)); } });
+      });
+    });
+  }
+
+  // Livello mostrato: { title, entries, sel }. La radice si costruisce al primo ingresso.
+  function vodLevel() {
+    if (!state.vod) state.vod = { stack: [{ title: 'Film e serie', entries: vodRootEntries(), sel: 0 }] };
+    return state.vod.stack[state.vod.stack.length - 1];
+  }
+
+  function vodRender(focusIdx) {
+    var lv = vodLevel(), q = state.query.toLowerCase();
+    state.filtered = q ? lv.entries.filter(function (e) { return e.title.toLowerCase().indexOf(q) >= 0; }) : lv.entries.slice();
+    gridV.reset();
+    $('grid-tools').classList.add('hidden');
+    var path = state.vod.stack.map(function (l) { return l.title; }).join('  ›  ');
+    setStatus(state.filtered.length ? path + '   ·   ' + state.filtered.length + (state.filtered.length === 1 ? ' elemento' : ' elementi') +
+      (state.vod.stack.length > 1 ? '   ·   Indietro per risalire' : '') : path + '   ·   niente da mostrare');
+    if (typeof focusIdx === 'number' && state.screen === 'browse') {
+      var c = gridV.ensure(Math.max(0, Math.min(focusIdx, state.filtered.length - 1)));
+      if (c) Nav.focus(c);
+    }
+  }
+
+  function vodOpen(i) {
+    var e = state.filtered[i];
+    if (!e) return;
+    var lv = vodLevel();
+    lv.sel = lv.entries.indexOf(e);
+    if (e.kind === 'play') {
+      var list = state.filtered.filter(function (x) { return x.kind === 'play'; });
+      state.vod.playFrom = i;
+      openPlayer(list, list.indexOf(e));
+      return;
+    }
+    var token = (state.vod.token = (state.vod.token || 0) + 1);
+    setStatus('Caricamento di “' + e.title + '”…');
+    e.load().then(function (entries) {
+      if (!state.vod || state.vod.token !== token) return;
+      if (!entries.length) { toast('Qui non c\'è niente da guardare'); vodRender(i); return; }
+      state.query = ''; el.search.value = '';
+      state.vod.stack.push({ title: e.title, entries: entries, sel: 0 });
+      vodRender(0);
+    }, function (err) {
+      if (!state.vod || state.vod.token !== token) return;
+      toast('Non riesco ad aprire “' + e.title + '”' + (err && err.message ? ' (' + err.message + ')' : ''), 5000);
+      vodRender(i);
+    });
+  }
+
+  // Indietro dentro Film e serie: risale di un livello. false se si è già alla radice.
+  function vodBack() {
+    if (!state.vod || state.vod.stack.length < 2) return false;
+    state.vod.stack.pop();
+    state.vod.token = (state.vod.token || 0) + 1;
+    vodRender(vodLevel().sel);
+    return true;
+  }
+
+  // Uscita dal lettore di un film: di nuovo l'elenco, sul titolo appena visto.
+  function vodReturn() {
+    show('browse');
+    if (state.group !== '__vod') { selectGroup('__vod'); return; }
+    var lv = vodLevel(), idx = lv.entries.indexOf(state.playing);
+    vodRender(idx >= 0 ? idx : (state.vod.playFrom || 0));
+  }
+
+  function makeVodCard(e, i) {
+    var d = document.createElement('div');
+    d.className = 'card focusable vod' + (e.kind === 'folder' ? ' vfolder' : '');
+    d.setAttribute('data-idx', i);
+    var logo = document.createElement('div'); logo.className = 'clogo';
+    if (e.logo) fillLogo(logo, e);
+    else logo.innerHTML = Icons.svg(e.kind === 'folder' ? (e.icon || 'folder') : 'film');
+    var name = document.createElement('div'); name.className = 'cname'; name.textContent = e.title;
+    var sub = document.createElement('div'); sub.className = 'cnow'; sub.textContent = e.sub || '';
+    var pos = e.kind === 'play' ? vodPos()[e.url] : 0;
+    if (pos) { var b = document.createElement('div'); b.className = 'cnum'; b.textContent = 'ripreso a ' + fmtDur(pos); d.appendChild(b); }
+    d.appendChild(logo); d.appendChild(name); d.appendChild(sub);
+    return d;
+  }
+
+  // Posizione dei film: si riprende da dove eri rimasto (solo su questo dispositivo, ultimi 200 titoli).
+  function vodPos() { return Store.get('vodPos', {}) || {}; }
+  function vodSavePos() {
+    var ch = state.playing, v = el.video;
+    if (!ch || !ch.vod || !(v.currentTime > 0)) return;
+    var all = vodPos(), dur = isFinite(v.duration) ? v.duration : 0;
+    if (dur && v.currentTime > dur - 90) delete all[ch.url];           // finito (o quasi): si riparte dall'inizio
+    else if (v.currentTime > 30) all[ch.url] = Math.floor(v.currentTime);
+    var keys = Object.keys(all);
+    if (keys.length > 200) delete all[keys[0]];
+    Store.set('vodPos', all);
+  }
+  function vodResume() {
+    state.vodResumed = true;
+    var p = vodPos()[state.playing.url], v = el.video;
+    if (p > 30 && (!isFinite(v.duration) || p < v.duration - 90)) {
+      try { v.currentTime = p; toast('Riprendo da ' + fmtDur(p) + ' (◀ per tornare indietro)', 3500); } catch (e) { /* non si può spostare */ }
+    }
+  }
+
+  // Fine di un episodio: parte il successivo della stessa stagione; fine di un film: si torna all'elenco.
+  el.video.addEventListener('ended', function () {
+    var ch = state.playing;
+    if (state.screen !== 'player' || !ch || !ch.vod) return;
+    vodSavePos();
+    if (ch.ep && state.playIdx + 1 < state.playList.length) { toast('Episodio successivo…', 2500); playIndex(state.playIdx + 1); return; }
+    closePlayer();
+  });
+
   // ---------------------------------------------------------------- Lettore
   function openPlayer(list, idx) {
     state.returnFocus = Nav.current();
@@ -1556,10 +1812,12 @@
 
   function closePlayer() {
     if (state.multiReturn) { returnToMulti(); return; }
+    if (state.playing && state.playing.vod) vodSavePos();                // prima di fermare il video
     stopStream();
     hideOsd();
     if (state.guide) closeGuide();
     el.perr.classList.add('hidden');
+    if (state.playing && state.playing.vod) { vodReturn(); return; }   // film: torna all'elenco dei film
     goHome(state.playing);
   }
 
@@ -1586,11 +1844,15 @@
     var n = state.playList.length;
     if (!n) return;
     i = ((i % n) + n) % n;
+    if (state.playing && state.playing.vod) vodSavePos();
     state.playIdx = i;
-    noteWatching(state.playList[i].url);
     state.playing = state.playList[i];
     state.stallRetries = 0;
-    Store.set('lastChannel', state.playing.url);
+    state.vodResumed = false;
+    if (!state.playing.vod) {                                             // i film non diventano "ultimo canale"
+      noteWatching(state.playing.url);
+      Store.set('lastChannel', state.playing.url);
+    }
     startStream(state.playing);
     showOsd(false);
   }
@@ -1670,7 +1932,7 @@
     clearTimeout(state.timers.stall);
     el.spinner.classList.remove('on');
     el.perr.querySelector('.perr-msg').textContent = plain ? msg : msg + ' Alcuni canali sono attivi solo in certi orari o paesi.';
-    if (!plain && state.playing) setDead(state.playing.url, true);
+    if (!plain && state.playing && !state.playing.vod) setDead(state.playing.url, true);
     el.perr.classList.remove('hidden');
   }
 
@@ -1681,7 +1943,8 @@
   }
 
   el.video.addEventListener('playing', function () {
-    if (state.playing) setDead(state.playing.url, false);
+    if (state.playing && !state.playing.vod) setDead(state.playing.url, false);
+    if (state.playing && state.playing.vod && !state.vodResumed) vodResume();
     if (!state.started && state.zapStart) Diag.time('Cambio canale (' + (state.mode === 'hlsjs' ? 'hls.js' : 'nativo') + ')', Date.now() - state.zapStart);
     state.started = true;
     el.spinner.classList.remove('on');
@@ -1821,6 +2084,7 @@
   // Secondi di ritardo rispetto alla diretta. hls.js riproduce sempre qualche segmento dietro al bordo
   // (liveSyncPosition): quella è la "diretta" normale, non va mostrata come ritardo.
   function behindLive() {
+    if (state.playing && state.playing.vod) return 0;                    // un film non ha una "diretta"
     var r = shiftRange();
     if (!r) return 0;
     var ref = (state.hls && state.hls.liveSyncPosition) || (r.end - 20);
@@ -1849,6 +2113,7 @@
   }
 
   function goLive(silent) {
+    if (state.playing && state.playing.vod) return;
     var r = shiftRange();
     if (r) el.video.currentTime = Math.max(r.start, (state.hls && state.hls.liveSyncPosition) || (r.end - 10));
     state.userShift = false;
@@ -1867,7 +2132,7 @@
   // Badge "Torna in diretta" sempre visibile (anche con la barra chiusa) quando si è indietro.
   // Se il ritardo NON è voluto (rallentamenti della rete), torna in diretta da solo.
   function updateLiveBadge() {
-    if (state.screen !== 'player' || !state.playing) { el.liveBadge.classList.add('hidden'); return; }
+    if (state.screen !== 'player' || !state.playing || state.playing.vod) { el.liveBadge.classList.add('hidden'); return; }
     var b = behindLive();
     var v = el.video;
     if (b && !state.userShift && !v.paused && Date.now() - (state.lastAutoLive || 0) > 30000 && b > AUTO_LIVE_LAG) {
@@ -1890,6 +2155,15 @@
     var b = behindLive(), r = shiftRange();
     var paused = el.video.paused && el.video.readyState > 0;
     var icon, txt;
+    if (state.playing && state.playing.vod) {                           // film: posizione e durata
+      var v = el.video, dur = isFinite(v.duration) ? v.duration : 0;
+      setIc(box, paused ? 'pause' : 'play', (paused ? 'In pausa · ' : '') + fmtDur(v.currentTime || 0) + (dur ? ' / ' + fmtDur(dur) : ''));
+      box.classList.remove('live');
+      el.osdLive.classList.add('hidden');
+      setIc(el.osdPause, el.video.paused ? 'play' : 'pause');
+      return;
+    }
+    el.osdLive.classList.remove('hidden');
     if (paused) { icon = 'pause'; txt = 'In pausa' + (b ? ' · −' + fmtDur(b) + ' dalla diretta' : ''); }
     else if (b) { icon = 'rewind'; txt = '−' + fmtDur(b) + ' dalla diretta'; }
     else { icon = 'dot'; txt = 'IN DIRETTA'; }
@@ -2148,7 +2422,7 @@
   function updateMultiPrefLabel() {
     var b = el.multiPref;
     if (!b) return;
-    setIc(b, 'multi', 'Riquadri: ' + (state.multiPref ? state.multiPref : 'Automatico (' + deviceTiles() + ')'));
+    setIc(b, 'multi', 'Multivisione, riquadri: ' + (state.multiPref ? state.multiPref : 'automatico (' + deviceTiles() + ')'));
   }
 
   // Canale dall'indirizzo: indice costruito al caricamento della playlist (prima scorreva tutta la lista ogni volta).
@@ -2566,11 +2840,12 @@
   // Senza "fixedList": preferiti in alto e poi tutti. Con "fixedList": quella lista, già posizionata su "selIdx".
   // ---------------------------------------------------------------- Aggiunta playlist / guide
   // Usate sia dai campi in Impostazioni sia dall'invio dal telefono. Un indirizzo già presente viene solo riattivato.
-  function addPlaylistUrl(name, url) {
+  function addPlaylistUrl(name, url, type) {
     var p = null;
     state.playlists.forEach(function (x) { if (x.url === url) p = x; });
+    if (p && type && p.type !== type) { p.type = type; saveCustomPlaylists(); }
     if (!p) {
-      p = { id: 'u' + Date.now(), name: name || 'Playlist personale', url: url, preset: false };
+      p = { id: 'u' + Date.now(), name: name || 'Playlist personale', url: url, type: type || 'm3u', preset: false };
       state.playlists.push(p);
       saveCustomPlaylists();
     }
@@ -2689,7 +2964,7 @@
       if (!xp) return;
       setIc(line, 'check', 'Account aggiunto e attivato: ' + xp.name);
     } else if (d.t === 'pl') {
-      var pl = addPlaylistUrl(name, d.url);
+      var pl = addPlaylistUrl(name, d.url, 'm3u');
       setIc(line, 'check', 'Playlist aggiunta e attivata: ' + pl.name);
     } else return;
     el.pair.querySelector('.pair-log').appendChild(line);
@@ -2789,7 +3064,6 @@
     closeSettings: closeSettings,
     showDiag: function () {
       var box = $('diag');
-      if (!box.classList.contains('hidden')) { box.classList.add('hidden'); return; }
       var lines = ['BTV ' + APP_VERSION + ' · ' + platform + ' · aperta da ' + Math.round((Date.now() - Diag.start) / 60000) + ' min'];
       var ps = Store.get('perf', {}) || {};
       lines.push('Prestazioni: ' + PERF_NAMES[PERF.tier] + (PERF.mode === 'auto' ? ' (automatiche)' : ' (scelte a mano; automatiche: ' + PERF_NAMES[PERF.auto] + ')') +
@@ -2806,8 +3080,13 @@
       });
       if (!Diag.items.length) lines.push('Nessuna misura ancora.');
       box.textContent = lines.join('\n');
-      box.classList.remove('hidden');
+      // Finestra sopra lo schermo (prima il riquadro si apriva in fondo alle Impostazioni, fuori vista sulla TV).
+      state.diagOpen = true;
+      box.scrollTop = 0;
+      $('diag-panel').classList.remove('hidden');
     },
+    // Schede "Account Xtream Codes" / "Playlist M3U": si vede un solo modulo alla volta.
+    addTab: function (b) { showAddTab(b.getAttribute('data-tab')); },
     closePlayer: function () { closePlayer(); },
     prevChannel: function () { prevChannel(); showOsd(true); },
     openChannelList: function () { openChannelList(); },
@@ -2889,7 +3168,7 @@
       state.updCheck = !state.updCheck; Store.set('updCheck', state.updCheck); updateOptLabels();
       if (state.updCheck) checkUpdate(true); else showUpdateBox(null);
     },
-    openLogin: function () { openSettings(); Nav.setRoot(el.screens.settings, $('xt-server')); $('xt-server').scrollIntoView(); },
+    openLogin: function () { openSettings(); showAddTab('xt'); Nav.setRoot(el.screens.settings, $('xt-server')); $('xt-server').scrollIntoView(); },
     addXtream: function () {
       var p = addXtream($('xt-server').value, $('xt-user').value.trim(), $('xt-pass').value, '');
       if (!p) return;
@@ -2902,7 +3181,7 @@
       var url = el.plUrlIn.value.trim();
       var name = el.plNameIn.value.trim();
       if (!/^https?:\/\/\S+$/i.test(url)) { toast('Inserisci un URL valido che inizi con http:// o https://'); return; }
-      addPlaylistUrl(name, url);
+      addPlaylistUrl(name, url, 'm3u');
       el.plUrlIn.value = ''; el.plNameIn.value = '';
       Nav.setRoot(el.screens.settings, el.plList.querySelector('.pl-row.current .btn'));
       toast('Playlist aggiunta e attivata');
@@ -2943,7 +3222,11 @@
   function activate(target) {
     if (!target) return;
     if (target.tagName === 'INPUT') { target.focus(); return; }
-    if (target.classList.contains('card')) { openPlayer(state.filtered, +target.getAttribute('data-idx')); return; }
+    if (target.classList.contains('card')) {
+      if (state.group === '__vod') { vodOpen(+target.getAttribute('data-idx')); return; }
+      openPlayer(state.filtered, +target.getAttribute('data-idx'));
+      return;
+    }
     if (target.classList.contains('group')) {
       clearTimeout(state.timers.group);
       selectGroup(target.getAttribute('data-group'));
@@ -2968,6 +3251,7 @@
     // browse
     var c = Nav.current();
     if (state.query) { state.query = ''; el.search.value = ''; applyFilter(); return; }
+    if (state.group === '__vod' && vodBack()) return;                     // Film e serie: un livello indietro
     if (c && c.classList.contains('card')) { Nav.focus(activeGroupEl()); return; }
     if (activePlaylist() && state.group !== '__home') { selectGroup('__home'); Nav.focus(el.pvPanel); return; }
     var now = Date.now();
@@ -2979,6 +3263,12 @@
   function handleAction(a) {
     if (!a) return false;
     if (state.pair) { if (a === 'back' || a === 'enter') closePair(); return true; }
+    if (state.diagOpen) {
+      var db = $('diag');
+      if (a === 'up' || a === 'down' || a === 'chup' || a === 'chdown') db.scrollTop += (a === 'up' || a === 'chup' ? -1 : 1) * 160;
+      else if (a === 'back' || a === 'enter') closeDiag();
+      return true;
+    }
     if (state.picker && a.indexOf('digit') !== 0) return pickerAction(a);
     if (state.reorder && state.screen === 'browse' && reorderKey(a)) return true; // i numeri restano "vai al canale N"
     if (state.guide) { if (guideAction(a)) return true; }
@@ -3030,7 +3320,7 @@
         // Elenco: Info / Verde / Play-Pausa aprono la guida del canale selezionato.
         if (state.screen === 'browse') {
           var cur = Nav.current();
-          if (cur && cur.classList.contains('card')) { openGuide(state.filtered, +cur.getAttribute('data-idx')); return true; }
+          if (cur && cur.classList.contains('card') && state.group !== '__vod') { openGuide(state.filtered, +cur.getAttribute('data-idx')); return true; }
         }
         return false;
       case 'chup': case 'chdown':
@@ -3124,6 +3414,7 @@
   // Supporto mouse / touch (browser, telecomandi "puntatore" LG Magic Remote).
   document.addEventListener('click', function (e) {
     var cl = function (sel) { return e.target.closest ? e.target.closest(sel) : null; };
+    if (state.diagOpen) { closeDiag(); return; }
     if (state.pair) {
       if (cl('[data-action="closePair"]') || !el.pair.querySelector('.pair-box').contains(e.target)) closePair();
       return;
@@ -3182,7 +3473,10 @@
   setInterval(function () { refreshEpgViews(true); }, 60000);
   setInterval(function () { updateClock(); refreshHome(); }, 30000);                                    // "in onda" aggiornato ogni minuto
   setInterval(function () {
-    if (state.screen === 'player' && state.playing && !el.video.paused && ++state.watchTick >= 30) { state.watchTick = 0; addWatch(state.playing.url, 30); }
+    if (state.screen === 'player' && state.playing && !el.video.paused && ++state.watchTick >= 30) {
+      state.watchTick = 0;
+      if (state.playing.vod) vodSavePos(); else addWatch(state.playing.url, 30);
+    }
     if (state.screen === 'player') { if (osdVisible()) updateShift(); updateLiveBadge(); playerWatchdog(); }
     else el.liveBadge.classList.add('hidden');
     if (state.screen === 'multi' && state.multi) { updateTileLive(); if (!background) tileWatchdog(); }

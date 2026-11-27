@@ -119,33 +119,38 @@
     <div class="settings-wrap">
       <h1>Impostazioni</h1>
 
-      <h2>Playlist</h2>
-      <div class="form-row">
-        <button class="btn focusable primary" data-action="openPair"><i data-ic="phone"></i>Aggiungi dal telefono o dal PC</button>
-        <span class="muted">Niente da scrivere col telecomando: inquadri un codice QR e incolli l'indirizzo sul telefono.</span>
-      </div>
+      <h2>Le tue playlist</h2>
       <div id="pl-list"></div>
 
-      <h2>Accedi con utente e password (Xtream Codes)</h2>
-      <div class="form-row">
-        <input id="xt-server" class="focusable wide" type="url" placeholder="Indirizzo del server (es. http://server.fornitore.com:8080)" autocomplete="off" spellcheck="false">
+      <h2>Aggiungi una playlist</h2>
+      <div class="form-row tabs">
+        <button class="btn focusable tab active" id="tab-xt" data-action="addTab" data-tab="xt"><i data-ic="settings"></i>Account Xtream Codes</button>
+        <button class="btn focusable tab" id="tab-m3u" data-action="addTab" data-tab="m3u"><i data-ic="list"></i>Playlist M3U</button>
+        <button class="btn focusable" data-action="openPair"><i data-ic="phone"></i>Dal telefono o dal PC</button>
       </div>
-      <div class="form-row">
-        <input id="xt-user" class="focusable" type="text" placeholder="Nome utente" autocomplete="off" spellcheck="false">
-        <input id="xt-pass" class="focusable" type="password" placeholder="Password" autocomplete="off">
-        <button class="btn focusable primary" data-action="addXtream">Accedi</button>
+      <div class="add-panel" id="add-xt">
+        <div class="form-row">
+          <input id="xt-server" class="focusable wide" type="url" placeholder="Indirizzo del server (es. http://server.fornitore.com:8080)" autocomplete="off" spellcheck="false">
+        </div>
+        <div class="form-row">
+          <input id="xt-user" class="focusable" type="text" placeholder="Nome utente" autocomplete="off" spellcheck="false">
+          <input id="xt-pass" class="focusable" type="password" placeholder="Password" autocomplete="off">
+          <button class="btn focusable primary" data-action="addXtream">Accedi</button>
+        </div>
+        <p class="hint">Consigliato se il fornitore ti ha dato server, utente e password: BTV scarica i canali in diretta tramite
+          l'accesso diretto (API Xtream), più leggero e veloce, e mostra <b>Film e serie</b> divisi per categoria.
+          Se il fornitore non permette l'accesso diretto, usa da sola la sua playlist completa. La guida TV si aggiunge da sola.</p>
       </div>
-      <p class="hint">BTV scarica solo i canali in diretta tramite l'accesso diretto del fornitore (API Xtream): è più leggero e veloce.
-        Se il fornitore non lo permette, usa da sola la playlist completa (M3U). La guida TV del fornitore si aggiunge da sola.</p>
-
-      <h2>Aggiungi una playlist M3U</h2>
-      <div class="form-row">
-        <input id="pl-name" class="focusable" type="text" placeholder="Nome (es. La mia lista)" autocomplete="off" spellcheck="false">
-        <input id="pl-url" class="focusable wide" type="url" placeholder="URL della playlist (https://…/lista.m3u)" autocomplete="off" spellcheck="false">
-        <button class="btn focusable primary" data-action="addPlaylist">Aggiungi</button>
+      <div class="add-panel hidden" id="add-m3u">
+        <div class="form-row">
+          <input id="pl-name" class="focusable" type="text" placeholder="Nome (es. La mia lista)" autocomplete="off" spellcheck="false">
+          <input id="pl-url" class="focusable wide" type="url" placeholder="Indirizzo della playlist (https://…/lista.m3u)" autocomplete="off" spellcheck="false">
+          <button class="btn focusable primary" data-action="addPlaylist">Aggiungi</button>
+        </div>
+        <p class="hint">Un indirizzo che finisce di solito in .m3u o .m3u8: BTV lo usa così com'è. Se contiene anche film e serie,
+          compaiono in <b>Film e serie</b>, separati dai canali. Se hai utente e password del fornitore, l'account Xtream è più leggero.</p>
       </div>
-      <p class="hint">Se l'indirizzo è una playlist Xtream (contiene <b>get.php?username=…&amp;password=…</b>), BTV prova prima l'accesso diretto
-        (solo canali in diretta, più leggero) e, se il fornitore non lo supporta, usa la playlist M3U completa.</p>
+      <p class="hint">Dal telefono o dal PC: inquadri un codice QR e incolli lì indirizzi e password, senza scrivere col telecomando.</p>
 
       <h2>Guida TV (EPG)</h2>
       <div class="form-row">
@@ -155,33 +160,31 @@
       </div>
       <div id="epg-list"></div>
       <div class="form-row">
-        <input id="epg-url" class="focusable wide" type="url" placeholder="URL guida XMLTV (https://…/guida.xml oppure .xml.gz)" autocomplete="off" spellcheck="false">
+        <input id="epg-url" class="focusable wide" type="url" placeholder="Indirizzo guida XMLTV (https://…/guida.xml oppure .xml.gz)" autocomplete="off" spellcheck="false">
         <button class="btn focusable primary" data-action="addEpg">Aggiungi guida</button>
-        <button class="btn focusable" data-action="openPair"><i data-ic="phone"></i>Dal telefono o PC</button>
       </div>
 
-      <h2>Multivisione</h2>
-      <div class="form-row">
-        <button class="btn focusable" id="multi-pref" data-action="cycleMultiPref"><i data-ic="multi"></i>Riquadri: Automatico</button>
-        <span class="muted">Automatico = 4 su PC e box potenti, 2 su Fire TV Stick e TV Samsung/LG. Premi OK per cambiare.</span>
-      </div>
+      <h2>Opzioni</h2>
+      <div class="opt-list">
+        <div class="opt-group">Riproduzione</div>
+        <button class="btn focusable opt" id="opt-resume" data-action="toggleResume"><i data-ic="play"></i>Anteprima in Home</button>
+        <button class="btn focusable opt" id="opt-dead" data-action="toggleHideDead"><i data-ic="warning"></i>Canali non funzionanti</button>
+        <button class="btn focusable opt" data-action="clearDead"><i data-ic="refresh"></i>Riprova tutti i canali non funzionanti</button>
+        <button class="btn focusable opt" id="multi-pref" data-action="cycleMultiPref"><i data-ic="multi"></i>Multivisione: riquadri</button>
 
-      <h2>Altro</h2>
-      <div class="form-row">
-        <button class="btn focusable" data-action="reload"><i data-ic="refresh"></i>Ricarica playlist</button>
-        <button class="btn focusable" data-action="clearFavs">Svuota preferiti</button>
+        <div class="opt-group">Prestazioni e aggiornamenti</div>
+        <button class="btn focusable opt" id="opt-perf" data-action="cyclePerf"><i data-ic="quality"></i>Prestazioni</button>
+        <button class="btn focusable opt" id="opt-update" data-action="toggleUpdCheck"><i data-ic="refresh"></i>Controllo aggiornamenti</button>
+        <button class="btn focusable opt hidden" id="opt-reset-upd" data-action="resetTvUpdate"><i data-ic="previous"></i>Torna alla versione installata</button>
+
+        <div class="opt-group">Dati</div>
+        <button class="btn focusable opt" data-action="reload"><i data-ic="refresh"></i>Ricarica la playlist</button>
+        <button class="btn focusable opt" data-action="clearFavs"><i data-ic="star"></i>Svuota preferiti</button>
+
+        <div class="opt-group">Assistenza</div>
+        <button class="btn focusable opt" data-action="showDiag"><i data-ic="doc"></i>Diagnostica (tempi e memoria)</button>
+        <button class="btn focusable opt" data-action="closeSettings"><i data-ic="back"></i>Torna ai canali</button>
       </div>
-      <div class="form-row">
-        <button class="btn focusable" id="opt-resume" data-action="toggleResume"><i data-ic="play"></i>All'avvio: ultimo canale</button>
-        <button class="btn focusable" id="opt-dead" data-action="toggleHideDead"><i data-ic="warning"></i>Canali non funzionanti: visibili</button>
-        <button class="btn focusable" id="opt-perf" data-action="cyclePerf">Prestazioni: automatiche</button>
-        <button class="btn focusable" id="opt-update" data-action="toggleUpdCheck">Controllo aggiornamenti: attivo</button>
-        <button class="btn focusable" data-action="clearDead"><i data-ic="refresh"></i>Riprova tutti i canali</button>
-        <button class="btn focusable hidden" id="opt-reset-upd" data-action="resetTvUpdate"><i data-ic="previous"></i>Torna alla versione installata</button>
-        <button class="btn focusable" data-action="showDiag"><i data-ic="doc"></i>Diagnostica</button>
-        <button class="btn focusable" data-action="closeSettings"><i data-ic="back"></i>Torna ai canali</button>
-      </div>
-      <pre class="diag hidden" id="diag"></pre>
 
       <p class="note">
         BTV è solo un lettore: non fornisce, non ospita e non consiglia alcun contenuto.
@@ -190,6 +193,15 @@
       <p class="note" id="app-version"></p>
     </div>
   </section>
+
+  <!-- ===== Diagnostica (finestra sopra lo schermo: Indietro o OK per chiudere) ===== -->
+  <div id="diag-panel" class="hidden">
+    <div class="diag-box">
+      <div class="diag-title"><i data-ic="doc"></i>Diagnostica</div>
+      <pre class="diag" id="diag"></pre>
+      <div class="muted">▲ ▼ scorri · OK o Indietro per chiudere</div>
+    </div>
+  </div>
 
   <!-- ===== Multivisione ===== -->
   <section id="multi" class="screen">

@@ -613,3 +613,30 @@ html, body { background: #050816; }
 .side-update span { font-size: .95rem; color: #e6ecff; margin-top: .2rem; }
 .side-update.focused { border-color: #fff; box-shadow: 0 0 0 .22rem #fff, 0 0 2rem rgba(255, 201, 60, .7); }
 .low-power .side-update.focused { box-shadow: 0 0 0 .22rem #fff !important; }
+
+/* ===== Impostazioni: schede Xtream / M3U, opzioni in lista, finestra Diagnostica ===== */
+.form-row.tabs .tab { opacity: .75; }
+.form-row.tabs .tab.active { opacity: 1; border-color: #8fd0ff; background: rgba(31, 107, 255, .35); }
+.add-panel { margin: .2rem 0 .6rem; padding: 1rem 1.2rem .4rem; border-radius: 1rem; background: rgba(10, 16, 40, .55);
+  border: .12rem solid rgba(80, 130, 255, .25); max-width: 80rem; }
+.add-panel.hidden { display: none; }
+.add-panel .hint { margin-bottom: .6rem; }
+.opt-list { display: flex; flex-direction: column; align-items: stretch; max-width: 52rem; }
+.opt-list .opt-group { font-size: .95rem; color: #7d859a; text-transform: uppercase; letter-spacing: .08rem; margin: 1.2rem 0 .5rem .2rem; }
+.opt-list .opt-group:first-child { margin-top: 0; }
+.opt-list .btn.opt { display: flex; justify-content: flex-start; text-align: left; width: 100%; margin: 0 0 .5rem; }
+.opt-list .btn.opt.hidden { display: none; }
+#diag-panel { position: fixed; left: 0; top: 0; right: 0; bottom: 0; z-index: 60; display: flex; align-items: center; justify-content: center;
+  background: rgba(2, 4, 12, .78); }
+#diag-panel.hidden { display: none; }
+#diag-panel .diag-box { width: 70rem; max-width: 92vw; max-height: 84vh; display: flex; flex-direction: column; padding: 1.6rem 2rem;
+  border-radius: 1.2rem; background: #0d1430; border: .15rem solid rgba(80, 130, 255, .4); }
+#diag-panel .diag-title { display: flex; align-items: center; font-size: 1.5rem; font-weight: 600; margin-bottom: 1rem; }
+#diag-panel .diag-title .ic { width: 1.6rem; height: 1.6rem; margin-right: .7rem; }
+#diag-panel .diag { flex: 1; min-height: 0; overflow-y: auto; margin: 0 0 1rem; max-width: none; }
+
+/* ===== Film e serie ===== */
+.card.vod .clogo > svg { width: 3.6rem; height: 3.6rem; color: #8fd0ff; fill: none; stroke: currentColor; stroke-width: 1.6; }
+.card.vfolder .cname { font-weight: 600; }
+.card.vod .cnow { color: #9fb6ff; }
+.card.vod .cnum { color: #ffc93c; }
