@@ -3,7 +3,7 @@
   'use strict';
 
   // ---------------------------------------------------------------- Config
-  var APP_VERSION = '1.12.2'; // aumentala a ogni aggiornamento: in Impostazioni vedi quale versione sta girando
+  var APP_VERSION = '1.12.3'; // aumentala a ogni aggiornamento: in Impostazioni vedi quale versione sta girando
   var PRESETS = [];      // nessuna lista precaricata: solo quelle che aggiungi tu
   // Guide TV gratuite in formato XMLTV (si possono disattivare o aggiungerne altre nelle Impostazioni).
   var DEFAULT_EPG = [];  // nessuna guida precaricata: quella della playlist + quelle che aggiungi tu
@@ -1350,7 +1350,7 @@
       { id: '__home', name: 'Home', icon: 'home', count: '' },
       { id: '__fav', name: 'Preferiti', icon: 'starf', count: favCount() },
       { id: '__all', name: 'Tutti i canali', icon: 'tv', count: state.channels.length }
-    ].concat(hasVod() ? [{ id: '__vod', name: 'Film e serie', icon: 'film', count: state.vodM3u && state.vodM3u.length ? state.vodM3u.length : '' }] : [])
+    ].concat(hasVod() ? [{ id: '__vod', name: 'On demand', icon: 'film', count: state.vodM3u && state.vodM3u.length ? state.vodM3u.length : '' }] : [])
       .concat(state.groups);
     items.forEach(function (g) {
       var b = document.createElement('div');
@@ -1679,39 +1679,49 @@
     return String(s).replace('T', ' ').slice(0, 16);
   }
 
-  var xtListCache = {};
-  function xtList(type, catId, catName, mode) {
+  // Contenuto di UNA categoria, chiesto al fornitore ogni volta che si entra (sempre aggiornato; una richiesta piccola).
+  // path (solo sport): le cartelle già scelte, es. ['Calcio'] → si mostrano solo le gare di quella disciplina.
+  function str(v) { return v === null || v === undefined ? '' : String(v); }
+  function xtList(type, catId, catName, mode, path) {
     var x = xtreamParts(activePlaylist().url);
     var action = (type === 'vod' ? 'get_vod_streams' : 'get_series') + '&category_id=' + encodeURIComponent(catId);
-    var key = activePlaylist().id + '|' + action;
-    if (!xtListCache[key]) xtListCache[key] = xtApi(action).then(null, function (e) { delete xtListCache[key]; throw e; });
-    return xtListCache[key].then(function (list) {
+    return xtApi(action).then(function (list) {
       if (!Array.isArray(list)) throw new Error('risposta non valida');
       var out = [];
       list.forEach(function (it) {
-        var year = it.year || (it.releaseDate || it.releasedate || '').slice(0, 4);
-        var sub = [year, it.rating ? '★ ' + it.rating : ''].filter(Boolean).join('  ·  ');
+        if (!it) return;
+        // i fornitori mandano anni e date come testo o come numero: tutto convertito in testo (prima un numero
+        // qui faceva fallire l'intera lista dei film)
+        var year = str(it.year) || str(it.releaseDate || it.releasedate || it.release_date).slice(0, 4);
+        var sub = [year, it.rating ? '★ ' + str(it.rating) : ''].filter(Boolean).join('  ·  ');
         if (type === 'vod') {
-          var sport = isSportItem(it.name, it.genre, it.tmdb_id || it.tmdb);
+          var genre = str(it.genre);
+          var sport = isSportItem(str(it.name), genre, it.tmdb_id || it.tmdb);
           if ((mode === 'sport') !== sport) return;
-          if (sport) sub = [String(it.genre || '').replace(/\s*·\s*/g, ' · '), sportWhen(it)].filter(Boolean).join('  ·  ');
-          out.push(vodEntry({ kind: 'play', title: String(it.name || 'Senza titolo'), logo: it.stream_icon || '', sub: sub, groups: [catName], when: it.starts_at || '',
+          if (sport) sub = [genre.replace(/\s*·\s*/g, ' · '), sportWhen(it)].filter(Boolean).join('  ·  ');
+          out.push(vodEntry({ kind: 'play', title: str(it.name) || 'Senza titolo', logo: str(it.stream_icon), sub: sub, groups: [catName], when: str(it.starts_at),
             // livelli dello sport dal genere: "Calcio · Serie A Enilive" → ['Calcio', 'Serie A Enilive']
-            sparts: String(it.genre || '').split(/\s*[·•|]\s*/).filter(function (p) { return !!p; }),
+            sparts: genre.split(/\s*[·•|]\s*/).filter(function (p) { return !!p; }),
             url: x.srv + '/movie/' + x.user + '/' + x.pass + '/' + encodeURIComponent(String(it.stream_id)) + '.' + xtExt(it.container_extension, 'mp4') }));
           return;
         }
-        var sid = String(it.series_id), title = String(it.name || 'Senza titolo'), cover = it.cover || '';
+        var sid = str(it.series_id), title = str(it.name) || 'Senza titolo', cover = str(it.cover);
         out.push(vodEntry({ kind: 'folder', title: title, logo: cover, sub: sub || 'Serie', load: function () { return xtSeries(sid, title, cover); } }));
       });
-      if (mode === 'sport') return sportTree(out, 0);
-      return out;
+      if (mode !== 'sport') return out;
+      path = path || [];
+      var inPath = out.filter(function (e) {
+        for (var k = 0; k < path.length; k++) if ((e.sparts[k] || (k === 0 ? 'Altro' : '')) !== path[k]) return false;
+        return true;
+      });
+      return sportTree(inPath, path.length, { type: type, catId: catId, catName: catName, path: path });
     });
   }
 
   // Sport in cartelle dal genere del fornitore: disciplina → competizione → gare (le più recenti per prime).
   // Le gare senza livello successivo stanno accanto alle cartelle; gare senza genere in "Altro".
-  function sportTree(items, depth) {
+  // Entrando in una cartella (es. "Calcio") si richiede di nuovo la categoria al fornitore: sempre aggiornato.
+  function sportTree(items, depth, ctx) {
     var groups = {}, order = [], loose = [];
     items.forEach(function (e) {
       var p = e.sparts && e.sparts[depth];
@@ -1724,7 +1734,7 @@
     var folders = order.map(function (p) {
       var list = groups[p];
       return vodEntry({ kind: 'folder', cat: true, title: p, icon: 'trophy', sub: list.length + (list.length === 1 ? ' gara' : ' gare'),
-        load: function () { return Promise.resolve(sportTree(list, depth + 1)); } });
+        load: function () { return xtList(ctx.type, ctx.catId, ctx.catName, 'sport', ctx.path.concat([p])); } });
     });
     return folders.concat(loose);
   }
@@ -1755,7 +1765,7 @@
 
   // Livello mostrato: { title, entries, sel }. La radice si costruisce al primo ingresso.
   function vodLevel() {
-    if (!state.vod) state.vod = { stack: [{ title: 'Film e serie', entries: vodRootEntries(), sel: 0 }] };
+    if (!state.vod) state.vod = { stack: [{ title: 'On demand', entries: vodRootEntries(), sel: 0 }] };
     return state.vod.stack[state.vod.stack.length - 1];
   }
 
@@ -1798,7 +1808,12 @@
     }
     e.load().then(descend).then(function (entries) {
       if (!state.vod || state.vod.token !== token) return;
-      if (!entries.length) { toast('Qui non c\'è niente da guardare'); vodRender(i); return; }
+      if (!entries.length) {
+        toast(isXtream(activePlaylist()) ? 'In “' + title + '” non c\'è ancora niente. Se il fornitore ha una “La mia lista”, aggiungi i titoli dal suo sito.' :
+          'In “' + title + '” non c\'è niente da guardare', 6000);
+        vodRender(i);
+        return;
+      }
       state.query = ''; el.search.value = '';
       state.vod.stack.push({ title: title, entries: entries, sel: 0 });
       vodRender(0);
