@@ -3,7 +3,7 @@
   'use strict';
 
   // ---------------------------------------------------------------- Config
-  var APP_VERSION = '1.12.0'; // aumentala a ogni aggiornamento: in Impostazioni vedi quale versione sta girando
+  var APP_VERSION = '1.12.1'; // aumentala a ogni aggiornamento: in Impostazioni vedi quale versione sta girando
   var PRESETS = [];      // nessuna lista precaricata: solo quelle che aggiungi tu
   // Guide TV gratuite in formato XMLTV (si possono disattivare o aggiungerne altre nelle Impostazioni).
   var DEFAULT_EPG = [];  // nessuna guida precaricata: quella della playlist + quelle che aggiungi tu
@@ -1619,13 +1619,22 @@
 
   function xtExt(e, def) { var x = String(e || def).replace(/[^a-z0-9]/gi, ''); return x || def; }
 
+  // Sport on demand (partite, gare): titoli SENZA scheda di film (TMDB) il cui genere (es. "Calcio · Serie A") o nome
+  // parla di sport. Chi ha una scheda TMDB è sempre un film, anche se sportivo (es. "Rocky": "Dramma, Sport").
+  var SPORT_RE = /calcio|serie [abc]\b|champions|europa league|conference league|premier league|la ?liga|bundesliga|ligue 1|coppa|supercoppa|\bsport|tennis|\batp\b|\bwta\b|formula ?1|\bf1\b|moto ?gp|superbike|basket|\bnba\b|eurolega|volley|pallavolo|rugby|ciclismo|giro d'italia|tour de france|\bnfl\b|\bnhl\b|\bmlb\b|\bufc\b|\bboxe\b|boxing|wrestling|\bwwe\b|\bgolf\b|nuoto|atletica|olimpiad|mondiali|europei|highlights|\bvs\.?\s/i;
+  function isSportItem(name, genre, tmdb) {
+    if (tmdb && String(tmdb) !== '0') return false;
+    return SPORT_RE.test(genre || '') || SPORT_RE.test(name || '');
+  }
+
   function vodRootEntries() {
     var pl = activePlaylist();
-    // Account Xtream con canali dall'API: film e serie dall'API. Se l'API non andava (playlist completa), dalla playlist.
+    // Account Xtream con canali dall'API: film, serie e sport dall'API. Se l'API non andava (playlist completa), dalla playlist.
     if (isXtream(pl) && !(state.vodM3u && state.vodM3u.length)) {
       return [
-        vodEntry({ kind: 'folder', title: 'Film', sub: 'Per categoria', icon: 'film', load: function () { return xtCats('vod'); } }),
-        vodEntry({ kind: 'folder', title: 'Serie TV', sub: 'Per categoria', icon: 'film', load: function () { return xtCats('series'); } })
+        vodEntry({ kind: 'folder', title: 'Film', sub: 'Per categoria', icon: 'film', load: function () { return xtCats('vod', 'film'); } }),
+        vodEntry({ kind: 'folder', title: 'Serie TV', sub: 'Per categoria', icon: 'film', load: function () { return xtCats('series'); } }),
+        vodEntry({ kind: 'folder', title: 'Sport', sub: 'Partite e gare registrate', icon: 'trophy', load: function () { return xtCats('vod', 'sport'); } })
       ];
     }
     var byGroup = {}, order = [];
@@ -1635,40 +1644,67 @@
       byGroup[g].push(ch);
     });
     order.sort(function (a, b) { return a.localeCompare(b); });
-    return order.map(function (g) {
+    function groupFolder(g) {
       return vodEntry({ kind: 'folder', title: g, sub: byGroup[g].length + (byGroup[g].length === 1 ? ' titolo' : ' titoli'), load: function () {
         return Promise.resolve(byGroup[g].map(function (ch) {
           return vodEntry({ kind: 'play', title: cleanName(ch.name), logo: ch.logo, url: ch.url, groups: [g] });
         }));
       } });
-    });
+    }
+    // Categorie sportive (dal nome della categoria) raccolte in "Sport"; le altre restano com'erano.
+    var sport = order.filter(function (g) { return SPORT_RE.test(g); });
+    var rest = order.filter(function (g) { return !SPORT_RE.test(g); }).map(groupFolder);
+    if (sport.length) {
+      rest.unshift(vodEntry({ kind: 'folder', title: 'Sport', sub: sport.length + (sport.length === 1 ? ' categoria' : ' categorie'), icon: 'trophy',
+        load: function () { return Promise.resolve(sport.map(groupFolder)); } }));
+    }
+    return rest;
   }
 
-  function xtCats(type) {
+  // mode (solo film): 'film' = senza lo sport, 'sport' = solo lo sport. Le liste si scaricano una volta per sessione.
+  function xtCats(type, mode) {
     return xtApi(type === 'vod' ? 'get_vod_categories' : 'get_series_categories').then(function (cats) {
       if (!Array.isArray(cats) || !cats.length) throw new Error('nessuna categoria');
       return cats.map(function (c) {
         var id = String(c.category_id), name = String(c.category_name || 'Altro');
-        return vodEntry({ kind: 'folder', title: name, sub: type === 'vod' ? 'Film' : 'Serie TV', load: function () { return xtList(type, id, name); } });
+        return vodEntry({ kind: 'folder', title: name, sub: type === 'series' ? 'Serie TV' : mode === 'sport' ? 'Sport' : 'Film',
+          load: function () { return xtList(type, id, name, mode); } });
       });
     });
   }
 
-  function xtList(type, catId, catName) {
+  function sportWhen(it) {
+    var s = it.starts_at || it.releasedate || it.releaseDate || '';
+    if (/^\d{9,11}$/.test(String(s))) { var d = new Date(+s * 1000); return isNaN(d) ? '' : d.toLocaleDateString('it-IT') + ' ' + hhmm(d.getTime()); }
+    return String(s).replace('T', ' ').slice(0, 16);
+  }
+
+  var xtListCache = {};
+  function xtList(type, catId, catName, mode) {
     var x = xtreamParts(activePlaylist().url);
     var action = (type === 'vod' ? 'get_vod_streams' : 'get_series') + '&category_id=' + encodeURIComponent(catId);
-    return xtApi(action).then(function (list) {
+    var key = activePlaylist().id + '|' + action;
+    if (!xtListCache[key]) xtListCache[key] = xtApi(action).then(null, function (e) { delete xtListCache[key]; throw e; });
+    return xtListCache[key].then(function (list) {
       if (!Array.isArray(list)) throw new Error('risposta non valida');
-      return list.map(function (it) {
+      var out = [];
+      list.forEach(function (it) {
         var year = it.year || (it.releaseDate || it.releasedate || '').slice(0, 4);
         var sub = [year, it.rating ? '★ ' + it.rating : ''].filter(Boolean).join('  ·  ');
         if (type === 'vod') {
-          return vodEntry({ kind: 'play', title: String(it.name || 'Senza titolo'), logo: it.stream_icon || '', sub: sub, groups: [catName],
-            url: x.srv + '/movie/' + x.user + '/' + x.pass + '/' + encodeURIComponent(String(it.stream_id)) + '.' + xtExt(it.container_extension, 'mp4') });
+          var sport = isSportItem(it.name, it.genre, it.tmdb_id || it.tmdb);
+          if ((mode === 'sport') !== sport) return;
+          if (sport) sub = [String(it.genre || '').replace(/\s*·\s*/g, ' · '), sportWhen(it)].filter(Boolean).join('  ·  ');
+          out.push(vodEntry({ kind: 'play', title: String(it.name || 'Senza titolo'), logo: it.stream_icon || '', sub: sub, groups: [catName], when: it.starts_at || '',
+            url: x.srv + '/movie/' + x.user + '/' + x.pass + '/' + encodeURIComponent(String(it.stream_id)) + '.' + xtExt(it.container_extension, 'mp4') }));
+          return;
         }
         var sid = String(it.series_id), title = String(it.name || 'Senza titolo'), cover = it.cover || '';
-        return vodEntry({ kind: 'folder', title: title, logo: cover, sub: sub || 'Serie', load: function () { return xtSeries(sid, title, cover); } });
+        out.push(vodEntry({ kind: 'folder', title: title, logo: cover, sub: sub || 'Serie', load: function () { return xtSeries(sid, title, cover); } }));
       });
+      // Sport: le gare più recenti per prime.
+      if (mode === 'sport') out.sort(function (a, b) { return String(b.when).localeCompare(String(a.when)); });
+      return out;
     });
   }
 
@@ -1680,7 +1716,8 @@
       if (!seasons.length) throw new Error('nessun episodio');
       function episodes(sn) {
         return (eps[sn] || []).map(function (e) {
-          var n = e.episode_num ? 'E' + e.episode_num + ' · ' : '';
+          // Numero davanti solo se il titolo non lo contiene già (es. "S01E01 - Tutti da Charlie").
+          var n = e.episode_num && !/^\s*S\d+\s*E\d+/i.test(e.title || '') ? 'E' + e.episode_num + ' · ' : '';
           var img = e.info && (e.info.movie_image || e.info.cover_big) || cover;
           var dur = e.info && e.info.duration ? e.info.duration : '';
           return vodEntry({ kind: 'play', ep: true, title: n + String(e.title || 'Episodio'), logo: img, sub: dur, groups: [title + ' · Stagione ' + sn],
