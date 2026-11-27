@@ -84,6 +84,46 @@ try {
   git add www/version.json updates/web android/app/build.gradle   # build.gradle: versione scritta da patch-android
   git commit -q -m "Versione $ver pubblicata"
   git push -q
+
+  # Il sito (version.json e aggiornamento per le TV) lo pubblica GitHub dopo il push. A volte la pubblicazione fallisce
+  # per un problema temporaneo di GitHub ("No artifacts named github-pages"): in quel caso si rilancia da soli,
+  # fino a 3 tentativi, e alla fine si controlla che il sito indichi davvero la nuova versione.
+  Write-Host "Aspetto che GitHub aggiorni il sito..." -ForegroundColor Cyan
+  $commit = (git rev-parse HEAD).Trim()
+  $runId = $null
+  for ($i = 0; $i -lt 40 -and -not $runId; $i++) {
+    Start-Sleep -Seconds 5
+    $runId = & $gh run list --repo $repo --workflow pages.yml --commit $commit --limit 1 --json databaseId --jq '.[0].databaseId'
+  }
+  $siteOk = $false
+  for ($attempt = 1; $attempt -le 3 -and $runId; $attempt++) {
+    & $gh run watch $runId --repo $repo --exit-status --interval 10 | Out-Null
+    if ($LASTEXITCODE -eq 0) { $siteOk = $true; break }
+    if ($attempt -eq 3) { break }
+    Write-Host "GitHub non ha pubblicato il sito (tentativo $attempt): riprovo..." -ForegroundColor Yellow
+    Start-Sleep -Seconds 20
+    $prev = & $gh run list --repo $repo --workflow pages.yml --limit 1 --json databaseId --jq '.[0].databaseId'
+    & $gh workflow run pages.yml --repo $repo --ref main | Out-Null
+    $runId = $null
+    for ($i = 0; $i -lt 40; $i++) {
+      Start-Sleep -Seconds 5
+      $id = & $gh run list --repo $repo --workflow pages.yml --limit 1 --json databaseId --jq '.[0].databaseId'
+      if ($id -and $id -ne $prev) { $runId = $id; break }
+    }
+  }
+  $online = ''
+  if ($siteOk) {
+    for ($i = 0; $i -lt 12; $i++) {
+      try { $online = (Invoke-RestMethod "https://btv-player.github.io/btv/version.json?x=$([DateTime]::Now.Ticks)" -UseBasicParsing).version } catch { $online = '' }
+      if ($online -eq $ver) { break }
+      Start-Sleep -Seconds 10
+    }
+  }
+  if ($online -ne $ver) {
+    throw "La release $tag e' su GitHub, ma il sito non si e' aggiornato (indica '$online'). Le app non vedono ancora ${ver}: riprova piu' tardi con 'gh workflow run pages.yml --repo $repo'."
+  }
+  Write-Host "Sito aggiornato: indica la versione $ver." -ForegroundColor Green
+
   Write-Host ""
   Write-Host "Fatto: BTV $ver pubblicata. Le app la segnaleranno al prossimo ritorno nella Home." -ForegroundColor Green
   Write-Host "Link diretto all'APK: https://github.com/$repo/releases/download/$tag/BTV.apk" -ForegroundColor Green
