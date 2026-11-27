@@ -3,7 +3,7 @@
   'use strict';
 
   // ---------------------------------------------------------------- Config
-  var APP_VERSION = '1.12.4'; // aumentala a ogni aggiornamento: in Impostazioni vedi quale versione sta girando
+  var APP_VERSION = '1.12.5'; // aumentala a ogni aggiornamento: in Impostazioni vedi quale versione sta girando
   var PRESETS = [];      // nessuna lista precaricata: solo quelle che aggiungi tu
   // Guide TV gratuite in formato XMLTV (si possono disattivare o aggiungerne altre nelle Impostazioni).
   var DEFAULT_EPG = [];  // nessuna guida precaricata: quella della playlist + quelle che aggiungi tu
@@ -1970,7 +1970,18 @@
           maxBufferLength: LIVE_AHEAD,          // mentre guardi: 30 s di anticipo (in pausa si allarga, vedi sotto)
           maxMaxBufferLength: TIMESHIFT_SECONDS,
           maxBufferSize: BUFFER_BYTES,
-          fragLoadingMaxRetry: 3
+          // Rete: più margine dalla diretta (4 pezzi invece di 3) = più scorta quando la connessione rallenta;
+          // la qualità sale solo con banda abbondante e scende presto; si parte dalla banda misurata l'ultima volta.
+          liveSyncDurationCount: 4,
+          liveMaxLatencyDurationCount: 12,
+          abrBandWidthFactor: 0.8,
+          abrBandWidthUpFactor: 0.6,
+          abrEwmaDefaultEstimate: Math.max(500e3, Math.min(+Store.get('bwEst', 0) || 0, 50e6) * 0.8) || 500e3,
+          capLevelToPlayerSize: true,              // niente qualità più alta di quella che lo schermo mostra
+          // Errori passeggeri del server: più tentativi prima di arrendersi; piccoli buchi nel video saltati da soli.
+          fragLoadingMaxRetry: 6,
+          levelLoadingMaxRetry: 6,
+          nudgeMaxRetry: 10
         },
         onMode: function (mode, hls) { state.mode = mode; state.hls = hls; if (!hls) state.levels = []; },
         onHls: function (hls) {
@@ -1981,6 +1992,8 @@
           });
           hls.on(Hls.Events.LEVEL_SWITCHED, updateQualityLabel);
           hls.on(Hls.Events.AUDIO_TRACKS_UPDATED, applyTrackPrefs);
+          hls.on(Hls.Events.FRAG_LOADED, function () { netSample(hls); });
+          hls.on(Hls.Events.ERROR, function (ev, d) { if (!d.fatal && d.details === Hls.ErrorDetails.BUFFER_STALLED_ERROR) netStall(hls); });
           hls.on(Hls.Events.SUBTITLE_TRACKS_UPDATED, applyTrackPrefs);
           hls.on(Hls.Events.AUDIO_TRACK_SWITCHED, updateTrackButtons);
         },
@@ -2068,6 +2081,35 @@
     state.levels.forEach(function (l) { if (l.height && hs.indexOf(l.height) < 0) hs.push(l.height); });
     hs.sort(function (a, b) { return b - a; });
     return [0].concat(hs);
+  }
+
+  // ---------------------------------------------------------------- Rete
+  // Banda misurata (salvata ogni 30 s: il prossimo canale parte già dalla qualità giusta) e blocchi per rete lenta.
+  var net = { est: 0, saved: 0, stalls: 0, recent: [], capped: 0 };
+  function netSample(hls) {
+    var bw = hls.bandwidthEstimate;
+    if (!(bw > 0) || !isFinite(bw)) return;
+    net.est = bw;
+    if (Date.now() - net.saved > 30000) { net.saved = Date.now(); Store.set('bwEst', Math.round(Math.min(bw, 50e6))); }
+  }
+  // Video fermo perché i dati non arrivano in tempo: con qualità automatica, al secondo blocco in un minuto
+  // si abbassa di un gradino (solo per questo canale) invece di continuare a fermarsi.
+  function netStall(hls) {
+    if (state.screen !== 'player' || !state.started) return;
+    var now = Date.now();
+    net.stalls++;
+    net.recent = net.recent.filter(function (t) { return now - t < 60000; });
+    net.recent.push(now);
+    var lv = hls.levels && hls.levels[hls.currentLevel];
+    Diag.time('Video fermo in attesa di dati' + (lv && lv.height ? ' (' + lv.height + 'p)' : '') + ' · banda stimata ' + (net.est ? (net.est / 1e6).toFixed(1) + ' Mbit/s' : 'n.d.'), 0);
+    if (state.quality || net.recent.length < 2 || !(hls.levels && hls.levels.length > 1)) return;
+    var cur = hls.loadLevel >= 0 ? hls.loadLevel : hls.currentLevel;
+    if (cur <= 0) return;
+    hls.autoLevelCapping = cur - 1;
+    hls.nextLoadLevel = cur - 1;
+    net.recent = []; net.capped++;
+    toast('Rete lenta: abbasso la qualità per evitare blocchi', 3500);
+    updateQualityLabel();
   }
 
   function applyQuality() {
@@ -3244,6 +3286,11 @@
       if (mem) lines.push('Memoria JavaScript: ' + Math.round(mem.usedJSHeapSize / 1048576) + ' MB (limite ' + Math.round(mem.jsHeapSizeLimit / 1048576) + ' MB)');
       lines.push('Elementi nella pagina: ' + document.getElementsByTagName('*').length + ' · canali: ' + state.channels.length +
         ' · con guida: ' + state.epgCount + ' · metodo per server ricordato: ' + Object.keys(streamModes).length);
+      var hlsNow = state.hls, lvNow = hlsNow && hlsNow.levels && hlsNow.levels[hlsNow.currentLevel];
+      var bwNow = Math.min(net.est || +Store.get('bwEst', 0) || 0, 50e6);
+      lines.push('Rete: banda stimata ' + (bwNow ? (bwNow / 1e6).toFixed(1) + ' Mbit/s' : 'non ancora misurata') +
+        ' · blocchi per rete lenta: ' + net.stalls + ' · qualità abbassata: ' + net.capped + ' volte' +
+        (lvNow ? ' · ora: ' + (lvNow.height || '?') + 'p a ' + (lvNow.bitrate / 1e6).toFixed(1) + ' Mbit/s' : ''));
       lines.push('');
       Diag.items.slice().reverse().forEach(function (d) {
         var t = new Date(d.at);
