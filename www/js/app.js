@@ -3,7 +3,7 @@
   'use strict';
 
   // ---------------------------------------------------------------- Config
-  var APP_VERSION = '1.12.7'; // aumentala a ogni aggiornamento: in Impostazioni vedi quale versione sta girando
+  var APP_VERSION = '1.12.8'; // aumentala a ogni aggiornamento: in Impostazioni vedi quale versione sta girando
   var PRESETS = [];      // nessuna lista precaricata: solo quelle che aggiungi tu
   // Guide TV gratuite in formato XMLTV (si possono disattivare o aggiungerne altre nelle Impostazioni).
   var DEFAULT_EPG = [];  // nessuna guida precaricata: quella della playlist + quelle che aggiungi tu
@@ -1981,8 +1981,7 @@
           maxBufferSize: BUFFER_BYTES,
           // Rete: più margine dalla diretta (4 pezzi invece di 3) = più scorta quando la connessione rallenta;
           // la qualità sale solo con banda abbondante e scende presto; si parte dalla banda misurata l'ultima volta.
-          liveSyncDurationCount: 4,
-          liveMaxLatencyDurationCount: 12,
+          liveSyncDurationCount: 4,             // (nessun limite al ritardo: chi torna indietro di proposito resta lì)
           abrBandWidthFactor: 0.8,
           abrBandWidthUpFactor: 0.6,
           abrEwmaDefaultEstimate: Math.max(500e3, Math.min(+Store.get('bwEst', 0) || 0, 50e6) * 0.8) || 500e3,
@@ -2224,7 +2223,15 @@
     if (!r) return 0;
     var ref = (state.hls && state.hls.liveSyncPosition) || (r.end - 20);
     var b = ref - el.video.currentTime;
-    return b > LIVE_TOLERANCE ? b : 0;
+    return b > liveTol(state.hls) ? b : 0;
+  }
+
+  // Margine entro cui si è "in diretta": almeno 6 s, ma con pezzi lunghi (i fornitori Xtream usano spesso 10 s)
+  // il punto della diretta avanza a scatti di un pezzo intero: sotto i due pezzi è normale, non un ritardo.
+  function liveTol(hls) {
+    var lv = hls && hls.levels && hls.levels[hls.currentLevel >= 0 ? hls.currentLevel : 0];
+    var td = lv && lv.details && lv.details.targetduration;
+    return Math.max(LIVE_TOLERANCE, td > 0 ? td * 2 + 2 : 0);
   }
 
   function fmtDur(s) {
@@ -2270,13 +2277,14 @@
     if (state.screen !== 'player' || !state.playing || state.playing.vod) { el.liveBadge.classList.add('hidden'); return; }
     var b = behindLive();
     var v = el.video;
-    if (b && !state.userShift && !v.paused && Date.now() - (state.lastAutoLive || 0) > 30000 && b > AUTO_LIVE_LAG) {
+    if (b && !state.userShift && !v.paused && Date.now() - (state.lastAutoLive || 0) > 30000 && b > Math.max(AUTO_LIVE_LAG, liveTol(state.hls) * 2)) {
       state.lastAutoLive = Date.now();
       goLive(true);
       toast('Il canale era rimasto indietro: riportato in diretta');
       return;
     }
-    if (b) {
+    // Solo se sei indietro perché l'hai voluto (◀, pausa): un piccolo ritardo dovuto alla rete non va segnalato.
+    if (b && (state.userShift || v.paused)) {
       setIc(el.liveBadge, [[v.paused ? 'pause' : 'rewind', '−' + fmtDur(b)], ['live', 'Torna in diretta' + (osdVisible() ? '' : '  (OK)')]]);
       el.liveBadge.classList.remove('hidden');
     } else {
@@ -2936,7 +2944,7 @@
     var end = v.seekable.end(v.seekable.length - 1);
     var ref = (t.hls && t.hls.liveSyncPosition) || (end - 20);
     var b = ref - v.currentTime;
-    return b > LIVE_TOLERANCE ? b : 0;
+    return b > liveTol(t.hls) ? b : 0;
   }
 
   function tileGoLive(i) {
