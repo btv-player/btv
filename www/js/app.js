@@ -3,7 +3,7 @@
   'use strict';
 
   // ---------------------------------------------------------------- Config
-  var APP_VERSION = '1.12.5'; // aumentala a ogni aggiornamento: in Impostazioni vedi quale versione sta girando
+  var APP_VERSION = '1.12.6'; // aumentala a ogni aggiornamento: in Impostazioni vedi quale versione sta girando
   var PRESETS = [];      // nessuna lista precaricata: solo quelle che aggiungi tu
   // Guide TV gratuite in formato XMLTV (si possono disattivare o aggiungerne altre nelle Impostazioni).
   var DEFAULT_EPG = [];  // nessuna guida precaricata: quella della playlist + quelle che aggiungi tu
@@ -944,7 +944,7 @@
     done = done || function () {};
     if (!state.updCheck || !window.fetch) { done(); return; }
     var now = Date.now();
-    if (!force && now - state.updLast < 60 * 60e3) { done(); return; }                    // al massimo una volta l'ora
+    if (!force && now - state.updLast < 10 * 60e3) { done(); return; }                    // al massimo ogni 10 minuti (file di pochi byte)
     state.updLast = now;
     fetch(VERSION_URL + '?v=' + Math.floor(now / 60000), { credentials: 'omit', cache: 'no-store', referrerPolicy: 'no-referrer' })
       .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
@@ -1552,6 +1552,15 @@
     $('app-version').textContent = 'BTV versione ' + APP_VERSION + (tvUpd ? ' (aggiornata dalla TV, installata: ' + window.BTV_BASE_VERSION + ')' : '') + '  ·  ' + platform +
       (platform === 'android' && /^https:/.test(location.href) && !/localhost/.test(location.host) ? '  ·  aggiornamenti automatici attivi' : '');
     show('settings');
+    // Aprendo le Impostazioni si controlla subito se c'è una versione nuova (e lo si scrive qui sotto).
+    if (state.updCheck) {
+      var verEl = $('app-version'), base = verEl.textContent;
+      var said = function () {
+        if (state.screen !== 'settings') return;
+        verEl.textContent = base + (state.update ? '  ·  disponibile la ' + state.update.version + ': torna ai canali e premi Aggiornamento' : '  ·  è l\'ultima versione');
+      };
+      if (Date.now() - state.updLast > 15000) checkUpdate(true, said); else said();   // appena controllato: basta dirlo
+    }
   }
 
   function closeDiag() { state.diagOpen = false; $('diag-panel').classList.add('hidden'); }
