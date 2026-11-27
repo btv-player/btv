@@ -205,6 +205,8 @@ button, input { font: inherit; color: inherit; }
 #settings { overflow-y: auto; }
 .settings-wrap { width: 100%; max-width: 110rem; margin: 0 auto; padding: 3rem 4rem 4rem; }
 .settings-wrap h1 { font-size: 2.6rem; margin: 0 0 1.5rem; }
+.settings-wrap .hint { margin: .2rem 0 0; font-size: 1rem; line-height: 1.5; color: #7d859a; max-width: 80rem; }
+.settings-wrap .hint b { color: #a9b4d0; font-weight: 600; }
 .settings-wrap h2 { font-size: 1.4rem; color: #7d859a; font-weight: 600; margin: 2.2rem 0 1rem; text-transform: uppercase; letter-spacing: .1rem; }
 .pl-row { display: flex; align-items: center; background: #131722; border-radius: .9rem; padding: 1rem 1.4rem; margin-bottom: .7rem;
   border: .15rem solid transparent; }

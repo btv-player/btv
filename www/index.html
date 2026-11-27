@@ -135,6 +135,8 @@
         <input id="xt-pass" class="focusable" type="password" placeholder="Password" autocomplete="off">
         <button class="btn focusable primary" data-action="addXtream">Accedi</button>
       </div>
+      <p class="hint">BTV scarica solo i canali in diretta tramite l'accesso diretto del fornitore (API Xtream): è più leggero e veloce.
+        Se il fornitore non lo permette, usa da sola la playlist completa (M3U). La guida TV del fornitore si aggiunge da sola.</p>
 
       <h2>Aggiungi una playlist M3U</h2>
       <div class="form-row">
@@ -142,6 +144,8 @@
         <input id="pl-url" class="focusable wide" type="url" placeholder="URL della playlist (https://…/lista.m3u)" autocomplete="off" spellcheck="false">
         <button class="btn focusable primary" data-action="addPlaylist">Aggiungi</button>
       </div>
+      <p class="hint">Se l'indirizzo è una playlist Xtream (contiene <b>get.php?username=…&amp;password=…</b>), BTV prova prima l'accesso diretto
+        (solo canali in diretta, più leggero) e, se il fornitore non lo supporta, usa la playlist M3U completa.</p>
 
       <h2>Guida TV (EPG)</h2>
       <div class="form-row">
