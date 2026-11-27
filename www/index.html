@@ -121,6 +121,9 @@
 
       <h2>Le tue playlist</h2>
       <div id="pl-list"></div>
+      <div class="form-row">
+        <button class="btn focusable" data-action="openPair"><i data-ic="phone"></i>Gestisci le liste dal telefono o dal PC</button>
+      </div>
 
       <h2>Aggiungi una playlist</h2>
       <div class="form-row tabs">
@@ -150,7 +153,7 @@
         <p class="hint">Un indirizzo che finisce di solito in .m3u o .m3u8: BTV lo usa così com'è. Se contiene anche film e serie,
           compaiono in <b>On demand</b> (film, serie e sport registrati), separati dai canali. Se hai utente e password del fornitore, l'account Xtream è più leggero.</p>
       </div>
-      <p class="hint">Dal telefono o dal PC: inquadri un codice QR e incolli lì indirizzi e password, senza scrivere col telecomando.</p>
+      <p class="hint">Dal telefono o dal PC: inquadri il codice QR (o scrivi il codice sul sito) e da lì aggiungi, attivi o elimini playlist e guide, senza scrivere col telecomando. Puoi sempre anche scriverle qui.</p>
 
       <h2>Guida TV (EPG)</h2>
       <div class="form-row">
@@ -249,21 +252,21 @@
   <!-- ===== Invia dal telefono o dal PC ===== -->
   <div id="pair" class="hidden">
     <div class="pair-box">
-      <div class="pair-title"><i data-ic="phone"></i>Aggiungi dal telefono o dal PC</div>
+      <div class="pair-title"><i data-ic="phone"></i>Dal telefono o dal PC: aggiungi e gestisci le liste</div>
       <div class="pair-body">
         <div class="pair-qr"></div>
         <div class="pair-info">
           <div class="pair-step"><b>Telefono:</b> inquadra il codice QR con la fotocamera.</div>
           <div class="pair-step"><b>PC o telefono:</b> apri <span class="pair-url"></span> e scrivi questo codice:</div>
           <div class="pair-code"></div>
-          <div class="pair-step">Poi incolla l'indirizzo della playlist o della guida TV e premi <b>Invia alla TV</b>.</div>
+          <div class="pair-step">Poi aggiungi un account Xtream, una playlist o una guida TV, oppure gestisci (attiva, elimina) quelle già presenti.</div>
           <div class="pair-status"></div>
           <div class="pair-log"></div>
         </div>
       </div>
       <div class="pair-foot">
         <span class="muted">Dati cifrati con il codice: solo questa TV può leggerli. Il codice vale 15 minuti.</span>
-        <button class="btn" data-action="closePair">Chiudi (Indietro)</button>
+        <button class="btn primary" id="pair-close" data-action="closePair">Fatto (OK)</button>
       </div>
     </div>
   </div>

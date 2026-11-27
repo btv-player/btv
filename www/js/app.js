@@ -3,7 +3,7 @@
   'use strict';
 
   // ---------------------------------------------------------------- Config
-  var APP_VERSION = '1.12.3'; // aumentala a ogni aggiornamento: in Impostazioni vedi quale versione sta girando
+  var APP_VERSION = '1.12.4'; // aumentala a ogni aggiornamento: in Impostazioni vedi quale versione sta girando
   var PRESETS = [];      // nessuna lista precaricata: solo quelle che aggiungi tu
   // Guide TV gratuite in formato XMLTV (si possono disattivare o aggiungerne altre nelle Impostazioni).
   var DEFAULT_EPG = [];  // nessuna guida precaricata: quella della playlist + quelle che aggiungi tu
@@ -2939,6 +2939,23 @@
     return p;
   }
 
+  function usePlaylistId(id) {
+    state.activeId = id;
+    Store.set('activePlaylist', state.activeId);
+    state.group = '__all'; state.query = ''; el.search.value = '';
+    loadActive();
+    renderPlaylists();
+  }
+
+  function deletePlaylistId(id) {
+    state.playlists = state.playlists.filter(function (p) { return p.id !== id; });
+    saveCustomPlaylists();
+    Cache.remove('cache:' + id);
+    Cache.remove('epg:' + id);
+    if (state.activeId === id) { state.activeId = state.playlists.length ? state.playlists[0].id : ''; Store.set('activePlaylist', state.activeId); loadActive(); }
+    renderPlaylists();
+  }
+
   function addEpgUrl(name, url) {
     var exists = state.epgSources.some(function (x) { return x.url === url; });
     if (!exists) state.epgSources.push({ id: 'e' + Date.now(), name: name || 'Guida personale', url: url, preset: false, on: true });
@@ -2966,7 +2983,9 @@
     el.pair.querySelector('.pair-log').innerHTML = '';
     el.pair.querySelector('.pair-qr').innerHTML = '';
     pairStatus('Preparo il codice…');
+    p.back = Nav.current();                                             // dove rimettere il cursore alla chiusura
     el.pair.classList.remove('hidden');
+    Nav.focus($('pair-close'));                                         // OK chiude: il pulsante si vede selezionato
     setTimeout(function () {       // lascia comparire il riquadro prima dei calcoli (sulle TV lente si nota)
       if (state.pair !== p) return;
       try {
@@ -2983,7 +3002,7 @@
       pairListen(p);
     }, 60);
     p.expire = setTimeout(function () {
-      if (state.pair === p) { closePair(); toast('Codice scaduto: riapri "Aggiungi dal telefono" se ti serve'); }
+      if (state.pair === p) { closePair(); toast('Codice scaduto: riapri "Dal telefono o dal PC" se ti serve'); }
     }, PAIR_MINUTES * 60e3);
   }
 
@@ -2994,6 +3013,12 @@
     clearTimeout(p.timer); clearTimeout(p.expire);
     if (p.es) { try { p.es.close(); } catch (e) { /* ignora */ } }
     el.pair.classList.add('hidden');
+    // Il cursore torna dov'era; se quell'elemento non c'è più (la pagina è stata ridisegnata), sul primo della schermata.
+    var back = p.back;
+    if (!back || !document.body.contains(back) || !back.offsetParent) {
+      back = state.screen === 'settings' ? el.screens.settings.querySelector('.focusable') : (firstMainItem() || activeGroupEl());
+    }
+    if (back) Nav.focus(back);
   }
 
   function pairStatus(t) { el.pair.querySelector('.pair-status').textContent = t; }
@@ -3034,7 +3059,8 @@
     if (!m || m.event !== 'message' || typeof m.message !== 'string') return;
     if (m.id) { if (p.seen[m.id]) return; p.seen[m.id] = 1; p.last = m.id; }
     var d = Pair.decrypt(p.keys, m.message);
-    if (!d) return;                                                     // non è per noi o è stato alterato
+    if (!d || d.from === 'tv') return;                                  // non è per noi, è stato alterato o l'ha mandato la TV
+    if (pairCommand(p, d)) return;
     if (d.t !== 'xt' && (typeof d.url !== 'string' || d.url.length > 2000 || !/^https?:\/\/\S+$/i.test(d.url))) return;
     var name = String(d.name || '').replace(/[\u0000-\u001f]/g, '').slice(0, 60);
     var line = document.createElement('div');
@@ -3050,8 +3076,70 @@
       var pl = addPlaylistUrl(name, d.url, 'm3u');
       setIc(line, 'check', 'Playlist aggiunta e attivata: ' + pl.name);
     } else return;
-    el.pair.querySelector('.pair-log').appendChild(line);
-    pairStatus('Ricevuto! Puoi inviare altro con lo stesso codice, oppure premi Indietro.');
+    pairLog(line);
+    pairSend(p, pairState());                                           // il telefono vede subito l'elenco aggiornato
+  }
+
+  function pairLog(line) {
+    var log = el.pair.querySelector('.pair-log');
+    log.appendChild(line);
+    while (log.children.length > 4) log.removeChild(log.firstChild);
+    pairStatus('Fatto! Puoi continuare dal telefono con lo stesso codice, oppure premi OK per tornare indietro.');
+  }
+
+  // Elenco per il telefono: solo id, nomi e stato. Mai indirizzi, utenti o password (e comunque tutto cifrato).
+  function pairState() {
+    return {
+      t: 'state', from: 'tv',
+      pl: state.playlists.slice(0, 20).map(function (x) {
+        return { i: x.id, n: String(x.name || '').slice(0, 40), x: isXtream(x) ? 1 : 0, a: x.id === state.activeId ? 1 : 0, f: x.preset ? 1 : 0 };
+      }),
+      epg: state.epgSources.slice(0, 10).map(function (x) {
+        return { i: x.id, n: String(x.name || '').slice(0, 40), o: x.on !== false ? 1 : 0, f: x.preset ? 1 : 0 };
+      })
+    };
+  }
+
+  function pairSend(p, obj) {
+    if (!p.keys || state.pair !== p) return;
+    try {
+      var xhr = new XMLHttpRequest();
+      xhr.open('POST', Pair.RELAY + p.keys.topic);
+      xhr.send(Pair.encrypt(p.keys, obj));
+    } catch (e) { /* il telefono può richiedere l'elenco */ }
+  }
+
+  // Comandi dal telefono: elenco, usa/elimina una playlist, attiva/elimina una guida. true se era un comando.
+  function pairCommand(p, d) {
+    var t = d.t, id = typeof d.id === 'string' ? d.id : '';
+    if (t === 'list') { pairSend(p, pairState()); return true; }
+    if (t !== 'use' && t !== 'del' && t !== 'epgOn' && t !== 'epgDel') return false;
+    var pl = null, src = null, msg = '';
+    state.playlists.forEach(function (x) { if (x.id === id) pl = x; });
+    state.epgSources.forEach(function (x) { if (x.id === id) src = x; });
+    if (t === 'use' && pl) {
+      usePlaylistId(id);
+      msg = 'Playlist attivata: ' + pl.name;
+    } else if (t === 'del' && pl && !pl.preset) {
+      deletePlaylistId(id);
+      msg = 'Playlist eliminata: ' + pl.name;
+    } else if (t === 'epgOn' && src) {
+      src.on = !!d.on;
+      saveEpgSources(); renderEpgSources(); loadEpg(true);
+      msg = 'Guida ' + (src.on ? 'attivata: ' : 'disattivata: ') + src.name;
+    } else if (t === 'epgDel' && src && !src.preset) {
+      state.epgSources = state.epgSources.filter(function (x) { return x.id !== id; });
+      saveEpgSources(); renderEpgSources(); loadEpg(true);
+      msg = 'Guida eliminata: ' + src.name;
+    }
+    if (msg) {
+      var line = document.createElement('div');
+      line.className = 'pair-item';
+      setIc(line, 'check', msg);
+      pairLog(line);
+    }
+    pairSend(p, pairState());                                           // anche se era già cambiato: l'elenco aggiornato
+    return true;
   }
 
   function openPicker(onPick, fixedList, selIdx, title) {
@@ -3192,22 +3280,12 @@
     cycleQuality: function () { cycleQuality(); showOsd(true); },
     openGuidePlaying: function () { openGuide(state.playList, state.playIdx); },
     usePlaylist: function (b) {
-      state.activeId = b.getAttribute('data-id');
-      Store.set('activePlaylist', state.activeId);
-      state.group = '__all'; state.query = ''; el.search.value = '';
-      loadActive();
-      renderPlaylists();
+      usePlaylistId(b.getAttribute('data-id'));
       Nav.setRoot(el.screens.settings, el.plList.querySelector('.pl-row.current .btn'));
       toast('Playlist attiva: ' + activePlaylist().name);
     },
     deletePlaylist: function (b) {
-      var id = b.getAttribute('data-id');
-      state.playlists = state.playlists.filter(function (p) { return p.id !== id; });
-      saveCustomPlaylists();
-      Cache.remove('cache:' + id);
-      Cache.remove('epg:' + id);
-      if (state.activeId === id) { state.activeId = state.playlists.length ? state.playlists[0].id : ''; Store.set('activePlaylist', state.activeId); loadActive(); }
-      renderPlaylists();
+      deletePlaylistId(b.getAttribute('data-id'));
       Nav.setRoot(el.screens.settings, null);
       toast('Playlist eliminata');
     },

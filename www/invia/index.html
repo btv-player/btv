@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="referrer" content="no-referrer">
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src https://ntfy.sh; img-src 'self' data:; form-action 'none'; base-uri 'none'">
-  <title>BTV · Invia alla TV</title>
+  <title>BTV · Telefono e PC</title>
   <link rel="icon" href="../icon.png">
   <style>
     :root { color-scheme: dark; }
@@ -33,6 +33,17 @@
     .msg.ok { display: block; background: #12301f; color: #8ff0b4; }
     .msg.err { display: block; background: #3a1c22; color: #ffb3bd; }
     .note { color: #7d859a; font-size: 13px; }
+    .mh { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; font-size: 17px; }
+    .small { font: inherit; font-size: 14px; color: #e8eaf0; background: #232a3b; border: 1px solid #2f3648; border-radius: 9px; padding: 7px 12px; cursor: pointer; }
+    .small.pri { background: #fff; color: #0b0d12; border-color: #fff; font-weight: 700; }
+    .small.del { background: #3a1c22; color: #ffb3bd; border-color: #5a2a33; }
+    .small[disabled] { opacity: .5; cursor: default; }
+    .sec { color: #8f97ab; font-size: 13px; text-transform: uppercase; letter-spacing: .5px; margin: 14px 0 6px; }
+    .sec:first-child { margin-top: 0; }
+    .item { display: flex; align-items: center; gap: 8px; padding: 10px 0; border-top: 1px solid #222838; }
+    .item .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .item .ty { color: #7d859a; font-size: 12px; }
+    .tag { font-size: 12px; color: #8ff0b4; }
   </style>
 </head>
 <body>
@@ -40,8 +51,8 @@
   <header>
     <img class="mark" src="../icon.png" alt="BTV">
     <div>
-      <h1>Invia alla TV</h1>
-      <div class="sub">Accedi al tuo fornitore o aggiungi playlist e guide a BTV senza usare il telecomando</div>
+      <h1>BTV dal telefono o dal PC</h1>
+      <div class="sub">Aggiungi, attiva o elimina account Xtream, playlist e guide della TV senza usare il telecomando</div>
     </div>
   </header>
 
@@ -50,10 +61,16 @@
     <input id="code" inputmode="text" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="XXXX-XXXX-XXXX" maxlength="14">
   </div>
 
+  <div class="card" id="manage">
+    <div class="mh"><b>Sulla TV</b><button type="button" id="refresh" class="small">Aggiorna</button></div>
+    <div id="m-body" class="note">Scrivi il codice mostrato sulla TV: qui compaiono le sue playlist e guide, da attivare o eliminare.</div>
+  </div>
+
   <div class="card">
+    <div class="mh"><b>Aggiungi</b></div>
     <div class="seg">
-      <button type="button" id="t-xt" class="on">Accesso</button>
-      <button type="button" id="t-pl">Playlist</button>
+      <button type="button" id="t-xt" class="on">Xtream Codes</button>
+      <button type="button" id="t-pl">Playlist M3U</button>
       <button type="button" id="t-epg">Guida TV</button>
     </div>
     <label for="name">Nome (facoltativo)</label>
@@ -75,7 +92,7 @@
   </div>
 
   <p class="note">
-    Il contenuto viene cifrato qui, sul tuo dispositivo, con il codice della TV e consegnato tramite ntfy.sh, che vede solo dati illeggibili.
+    Tutto viene cifrato qui, sul tuo dispositivo, con il codice della TV e consegnato tramite ntfy.sh, che vede solo dati illeggibili. La TV manda a questa pagina solo i nomi delle liste, mai indirizzi o password.
     Il codice cambia ogni volta che apri questa funzione sulla TV.
   </p>
 </main>
