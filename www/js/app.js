@@ -3,7 +3,7 @@
   'use strict';
 
   // ---------------------------------------------------------------- Config
-  var APP_VERSION = '1.12.6'; // aumentala a ogni aggiornamento: in Impostazioni vedi quale versione sta girando
+  var APP_VERSION = '1.12.7'; // aumentala a ogni aggiornamento: in Impostazioni vedi quale versione sta girando
   var PRESETS = [];      // nessuna lista precaricata: solo quelle che aggiungi tu
   // Guide TV gratuite in formato XMLTV (si possono disattivare o aggiungerne altre nelle Impostazioni).
   var DEFAULT_EPG = [];  // nessuna guida precaricata: quella della playlist + quelle che aggiungi tu
@@ -129,7 +129,7 @@
     groups: $('groups'), grid: $('grid'), search: $('search'), status: $('status'),
     plName: $('playlist-name'), settingsBtn: $('btn-settings'),
     video: $('video'), spinner: $('spinner'), perr: $('player-error'), numjump: $('numjump'),
-    osd: $('osd'), osdFav: $('osd-fav'), osdQuality: $('osd-quality'), osdShift: $('osd-shift'),
+    osd: $('osd'), seek: $('osd-seek'), osdFav: $('osd-fav'), osdQuality: $('osd-quality'), osdShift: $('osd-shift'),
     osdLive: $('osd-live'), osdPause: $('osd-pause'), liveBadge: $('live-badge'),
     osdPrev: $('osd-prev'), osdAudio: $('osd-audio'), osdSubs: $('osd-subs'),
     optResume: $('opt-resume'), optDead: $('opt-dead'),
@@ -2014,6 +2014,7 @@
 
   function startStream(ch) {
     stopStream();
+    seekCancel();
     el.perr.classList.add('hidden');
     if (!/^https?:\/\//i.test(ch.url)) { showPlayerError('Indirizzo del canale non supportato (sono ammessi solo http e https).', true); return; }
     if (blockedLan(ch.url)) { showPlayerError('Questo canale punta a un dispositivo della tua rete di casa: bloccato per sicurezza.', true); return; }
@@ -2286,6 +2287,7 @@
   function updateShift() {
     var box = el.osdShift;
     if (!box) return;
+    updateSeekBar();
     var b = behindLive(), r = shiftRange();
     var paused = el.video.paused && el.video.readyState > 0;
     var icon, txt;
@@ -2307,6 +2309,62 @@
     el.osdLive.classList.toggle('primary', !!b);
     setIc(el.osdPause, el.video.paused ? 'play' : 'pause');
   }
+
+  // ---------------------------------------------------------------- Barra di avanzamento (film ed episodi)
+  // ◀ ▶ spostano il punto (più premi di seguito, più accelera); dopo un attimo senza tasti, o con OK, il video salta lì.
+  // Col puntatore LG si clicca direttamente sul punto della barra.
+  var seek = { target: null, timer: null, last: 0, count: 0 };
+  var SEEK_STEPS = [10, 10, 10, 30, 30, 30, 60, 60, 120, 120, 300];
+
+  function vodDur() { var d = el.video.duration; return isFinite(d) && d > 0 ? d : 0; }
+
+  function updateSeekBar() {
+    var bar = el.seek;
+    if (!bar) return;
+    var dur = vodDur(), vod = !!(state.playing && state.playing.vod);
+    bar.classList.toggle('hidden', !vod || !dur);
+    if (!vod || !dur) return;
+    var v = el.video, t = seek.target !== null ? seek.target : (v.currentTime || 0), buf = 0, i;
+    for (i = 0; i < v.buffered.length; i++) if (v.buffered.start(i) <= v.currentTime + 1) buf = Math.max(buf, v.buffered.end(i));
+    var pct = Math.max(0, Math.min(100, t / dur * 100));
+    bar.querySelector('.seek-done').style.width = pct + '%';
+    bar.querySelector('.seek-buf').style.width = Math.min(100, buf / dur * 100) + '%';
+    bar.querySelector('.seek-knob').style.left = pct + '%';
+    var tip = bar.querySelector('.seek-tip');
+    tip.style.left = Math.max(4, Math.min(96, pct)) + '%';
+    var diff = seek.target !== null ? seek.target - (v.currentTime || 0) : 0;
+    tip.textContent = fmtDur(t) + (seek.target !== null ? '   (' + (diff >= 0 ? '+' : '−') + fmtDur(Math.abs(diff)) + ')' : '');
+    bar.classList.toggle('pending', seek.target !== null);
+  }
+
+  function seekMove(dir) {
+    var dur = vodDur();
+    if (!dur) return;
+    var now = Date.now();
+    seek.count = now - seek.last < 700 ? seek.count + 1 : 0;
+    seek.last = now;
+    var step = Math.min(SEEK_STEPS[Math.min(seek.count, SEEK_STEPS.length - 1)], Math.max(60, dur / 20));
+    var from = seek.target !== null ? seek.target : (el.video.currentTime || 0);
+    seek.target = Math.max(0, Math.min(dur - 5, from + dir * step));
+    clearTimeout(seek.timer);
+    seek.timer = setTimeout(seekApply, 1200);
+    updateSeekBar();
+    showOsd(true);                                                      // la barra resta aperta mentre ti sposti
+  }
+
+  // Salta al punto scelto. false se non c'era niente da applicare.
+  function seekApply() {
+    clearTimeout(seek.timer);
+    if (seek.target === null) return false;
+    var t = seek.target;
+    seek.target = null;
+    try { el.video.currentTime = t; } catch (e) { /* non si può spostare */ }
+    if (el.video.paused) tryPlay();
+    updateShift();
+    return true;
+  }
+
+  function seekCancel() { clearTimeout(seek.timer); seek.target = null; }
 
   // ---------------------------------------------------------------- Barra info (OSD)
   // Logo, numero, nome e gruppo del canale nella barra (anche del canale verso cui si sta cambiando).
@@ -2330,6 +2388,9 @@
     el.osdPrev.classList.toggle('hidden', !state.prevUrl);
     setIc($('osd-home'), state.multiReturn ? 'multi' : 'home', state.multiReturn ? 'Multivisione' : 'Home');
     updateShift();
+    var help = el.osd.querySelector('.osd-help');
+    if (help._live === undefined) help._live = help.textContent;
+    help.textContent = ch.vod ? '◀ ▶ sulla barra: indietro / avanti (premi più volte per andare più veloce) · OK: vai lì / pausa · ▲ ▼ barra e pulsanti · Indietro: elenco' : help._live;
     el.osd.classList.remove('hidden');
     if (withFocus) Nav.setRoot(el.osd, Nav.current() && el.osd.contains(Nav.current()) ? Nav.current() : el.osdPause);
     clearTimeout(state.timers.osd);
@@ -3500,9 +3561,18 @@
       var osdOn = osdVisible() && Nav.current() && el.osd.contains(Nav.current());
       if (!osdOn && (a === 'up' || a === 'down' || a === 'left' || a === 'right' || a === 'enter')) {
         showOsd(false);
-        Nav.setRoot(el.osd, behindLive() ? el.osdLive : el.osdPause);
+        Nav.setRoot(el.osd, state.playing && state.playing.vod && !el.seek.classList.contains('hidden') ? el.seek : behindLive() ? el.osdLive : el.osdPause);
         showOsd(true);
         return true;
+      }
+      // Film: barra di avanzamento sopra i pulsanti (▲ ▼ passano dall'una agli altri).
+      if (state.playing && state.playing.vod && !el.seek.classList.contains('hidden')) {
+        if (Nav.current() === el.seek) {
+          if (a === 'left' || a === 'right') { seekMove(a === 'left' ? -1 : 1); return true; }
+          if (a === 'enter') { if (!seekApply()) togglePause(); showOsd(true); return true; }
+          if (a === 'down') { seekApply(); Nav.focus(el.osdPause); showOsd(true); return true; }
+          if (a === 'up') { showOsd(true); return true; }
+        } else if (a === 'up') { Nav.focus(el.seek); showOsd(true); return true; }
       }
       switch (a) {
         case 'up': zap(1); showOsd(true); return true;
@@ -3632,6 +3702,15 @@
   document.addEventListener('click', function (e) {
     var cl = function (sel) { return e.target.closest ? e.target.closest(sel) : null; };
     if (state.diagOpen) { closeDiag(); return; }
+    var sk = cl('#osd-seek');
+    if (sk && state.screen === 'player' && vodDur()) {
+      var rc = sk.querySelector('.seek-track').getBoundingClientRect();
+      seek.target = Math.max(0, Math.min(vodDur() - 5, (e.clientX - rc.left) / rc.width * vodDur()));
+      seekApply();
+      Nav.focus(sk);
+      showOsd(true);
+      return;
+    }
     if (state.pair) {
       if (cl('[data-action="closePair"]') || !el.pair.querySelector('.pair-box').contains(e.target)) closePair();
       return;

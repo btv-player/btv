@@ -105,6 +105,18 @@ button, input { font: inherit; color: inherit; }
 .osd-next { font-size: 1.1rem; color: #aab1c3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .osd-shift { font-size: 1.15rem; color: #ffc93c; margin: 1.2rem 0 .8rem; }
 .osd-shift.live { color: #ff5a5a; }
+/* Barra di avanzamento dei film: ◀ ▶ spostano il punto, OK (o una breve pausa) salta lì */
+.osd-seek { position: relative; padding: 1.1rem 0 .6rem; margin-bottom: .6rem; border-radius: .6rem; cursor: pointer; }
+.seek-track { position: relative; height: .5rem; background: rgba(255, 255, 255, .18); border-radius: .3rem; }
+.seek-track i { position: absolute; left: 0; top: 0; bottom: 0; border-radius: .3rem; }
+.seek-buf { background: rgba(255, 255, 255, .28); }
+.seek-done { background: #2f6bff; }
+.seek-knob { position: absolute; top: 50%; width: 1.3rem; height: 1.3rem; margin: -.65rem 0 0 -.65rem; border-radius: 50%; background: #fff; display: none; }
+.seek-tip { position: absolute; top: -1.4rem; transform: translateX(-50%); font-size: 1.15rem; font-weight: 700; color: #fff;
+  background: #2f6bff; padding: .15rem .6rem; border-radius: .4rem; white-space: nowrap; display: none; }
+.osd-seek.focused .seek-track { height: .8rem; }
+.osd-seek.focused .seek-knob { display: block; }
+.osd-seek.pending .seek-tip, .osd-seek.focused .seek-tip { display: block; }
 .osd-help { font-size: .95rem; color: #6c7488; margin-top: .8rem; }
 .osd-sep { flex: 1; }
 .osd-logo { width: 9rem; height: 6rem; border-radius: .8rem; background: rgba(255, 255, 255, .08); display: flex;
