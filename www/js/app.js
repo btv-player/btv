@@ -3,7 +3,7 @@
   'use strict';
 
   // ---------------------------------------------------------------- Config
-  var APP_VERSION = '1.12.1'; // aumentala a ogni aggiornamento: in Impostazioni vedi quale versione sta girando
+  var APP_VERSION = '1.12.2'; // aumentala a ogni aggiornamento: in Impostazioni vedi quale versione sta girando
   var PRESETS = [];      // nessuna lista precaricata: solo quelle che aggiungi tu
   // Guide TV gratuite in formato XMLTV (si possono disattivare o aggiungerne altre nelle Impostazioni).
   var DEFAULT_EPG = [];  // nessuna guida precaricata: quella della playlist + quelle che aggiungi tu
@@ -1645,7 +1645,7 @@
     });
     order.sort(function (a, b) { return a.localeCompare(b); });
     function groupFolder(g) {
-      return vodEntry({ kind: 'folder', title: g, sub: byGroup[g].length + (byGroup[g].length === 1 ? ' titolo' : ' titoli'), load: function () {
+      return vodEntry({ kind: 'folder', cat: true, title: g, sub: byGroup[g].length + (byGroup[g].length === 1 ? ' titolo' : ' titoli'), load: function () {
         return Promise.resolve(byGroup[g].map(function (ch) {
           return vodEntry({ kind: 'play', title: cleanName(ch.name), logo: ch.logo, url: ch.url, groups: [g] });
         }));
@@ -1667,7 +1667,7 @@
       if (!Array.isArray(cats) || !cats.length) throw new Error('nessuna categoria');
       return cats.map(function (c) {
         var id = String(c.category_id), name = String(c.category_name || 'Altro');
-        return vodEntry({ kind: 'folder', title: name, sub: type === 'series' ? 'Serie TV' : mode === 'sport' ? 'Sport' : 'Film',
+        return vodEntry({ kind: 'folder', cat: true, title: name, sub: type === 'series' ? 'Serie TV' : mode === 'sport' ? 'Sport' : 'Film',
           load: function () { return xtList(type, id, name, mode); } });
       });
     });
@@ -1696,16 +1696,37 @@
           if ((mode === 'sport') !== sport) return;
           if (sport) sub = [String(it.genre || '').replace(/\s*·\s*/g, ' · '), sportWhen(it)].filter(Boolean).join('  ·  ');
           out.push(vodEntry({ kind: 'play', title: String(it.name || 'Senza titolo'), logo: it.stream_icon || '', sub: sub, groups: [catName], when: it.starts_at || '',
+            // livelli dello sport dal genere: "Calcio · Serie A Enilive" → ['Calcio', 'Serie A Enilive']
+            sparts: String(it.genre || '').split(/\s*[·•|]\s*/).filter(function (p) { return !!p; }),
             url: x.srv + '/movie/' + x.user + '/' + x.pass + '/' + encodeURIComponent(String(it.stream_id)) + '.' + xtExt(it.container_extension, 'mp4') }));
           return;
         }
         var sid = String(it.series_id), title = String(it.name || 'Senza titolo'), cover = it.cover || '';
         out.push(vodEntry({ kind: 'folder', title: title, logo: cover, sub: sub || 'Serie', load: function () { return xtSeries(sid, title, cover); } }));
       });
-      // Sport: le gare più recenti per prime.
-      if (mode === 'sport') out.sort(function (a, b) { return String(b.when).localeCompare(String(a.when)); });
+      if (mode === 'sport') return sportTree(out, 0);
       return out;
     });
+  }
+
+  // Sport in cartelle dal genere del fornitore: disciplina → competizione → gare (le più recenti per prime).
+  // Le gare senza livello successivo stanno accanto alle cartelle; gare senza genere in "Altro".
+  function sportTree(items, depth) {
+    var groups = {}, order = [], loose = [];
+    items.forEach(function (e) {
+      var p = e.sparts && e.sparts[depth];
+      if (!p) { if (depth === 0) p = 'Altro'; else { loose.push(e); return; } }
+      if (!groups[p]) { groups[p] = []; order.push(p); }
+      groups[p].push(e);
+    });
+    order.sort(function (a, b) { return a === 'Altro' ? 1 : b === 'Altro' ? -1 : a.localeCompare(b); });
+    loose.sort(function (a, b) { return String(b.when).localeCompare(String(a.when)); });
+    var folders = order.map(function (p) {
+      var list = groups[p];
+      return vodEntry({ kind: 'folder', cat: true, title: p, icon: 'trophy', sub: list.length + (list.length === 1 ? ' gara' : ' gare'),
+        load: function () { return Promise.resolve(sportTree(list, depth + 1)); } });
+    });
+    return folders.concat(loose);
   }
 
   function xtSeries(sid, title, cover) {
@@ -1765,11 +1786,21 @@
     }
     var token = (state.vod.token = (state.vod.token || 0) + 1);
     setStatus('Caricamento di “' + e.title + '”…');
-    e.load().then(function (entries) {
+    // Una cartella che contiene solo un'altra cartella (es. "Film" → "La mia lista") si attraversa da sola:
+    // si apre direttamente quella dentro, e nel percorso compaiono tutte e due.
+    var title = e.title;
+    function descend(entries) {
+      if (entries.length === 1 && entries[0].kind === 'folder' && entries[0].cat) {   // solo categorie, non una serie
+        title += '  ›  ' + entries[0].title;
+        return entries[0].load().then(descend);
+      }
+      return entries;
+    }
+    e.load().then(descend).then(function (entries) {
       if (!state.vod || state.vod.token !== token) return;
       if (!entries.length) { toast('Qui non c\'è niente da guardare'); vodRender(i); return; }
       state.query = ''; el.search.value = '';
-      state.vod.stack.push({ title: e.title, entries: entries, sel: 0 });
+      state.vod.stack.push({ title: title, entries: entries, sel: 0 });
       vodRender(0);
     }, function (err) {
       if (!state.vod || state.vod.token !== token) return;
